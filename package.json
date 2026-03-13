@@ -1,0 +1,133 @@
+{
+  "name": "ace-feedback-reader",
+  "displayName": "Ace Feedback Reader",
+  "description": "A Markdown preview reader with annotation capabilities for AI feedback — highlight, comment, edit, and suggest deletions directly in preview.",
+  "version": "0.1.0",
+  "publisher": "ace",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ace.openPreview",
+        "title": "Ace: Open Feedback Preview",
+        "icon": {
+          "light": "media/preview-light.svg",
+          "dark": "media/preview-dark.svg"
+        }
+      },
+      {
+        "command": "ace.insertHighlight",
+        "title": "Ace: Highlight Selection"
+      },
+      {
+        "command": "ace.insertComment",
+        "title": "Ace: Add Comment"
+      },
+      {
+        "command": "ace.insertEdit",
+        "title": "Ace: Suggest Edit"
+      },
+      {
+        "command": "ace.insertDelete",
+        "title": "Ace: Suggest Deletion"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == markdown",
+          "command": "ace.openPreview",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "when": "resourceLangId == markdown && editorHasSelection",
+          "command": "ace.insertHighlight",
+          "group": "ace@1"
+        },
+        {
+          "when": "resourceLangId == markdown && editorHasSelection",
+          "command": "ace.insertComment",
+          "group": "ace@2"
+        },
+        {
+          "when": "resourceLangId == markdown && editorHasSelection",
+          "command": "ace.insertEdit",
+          "group": "ace@3"
+        },
+        {
+          "when": "resourceLangId == markdown && editorHasSelection",
+          "command": "ace.insertDelete",
+          "group": "ace@4"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ace.openPreview",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "resourceLangId == markdown"
+      },
+      {
+        "command": "ace.insertHighlight",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "editorTextFocus && resourceLangId == markdown"
+      },
+      {
+        "command": "ace.insertComment",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
+        "when": "editorTextFocus && resourceLangId == markdown"
+      }
+    ],
+    "configuration": {
+      "title": "Ace Feedback Reader",
+      "properties": {
+        "ace.theme": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "light", "dark"],
+          "description": "Preview theme (auto follows VS Code theme)"
+        },
+        "ace.highlightColor": {
+          "type": "string",
+          "default": "#fff3a0",
+          "description": "Background color for highlighted text"
+        },
+        "ace.showAnnotationGutter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show annotation markers in the gutter"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.1",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "markdown-it": "^14.0.0"
+  }
+}
