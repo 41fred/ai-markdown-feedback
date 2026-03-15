@@ -1,9 +1,26 @@
 {
   "name": "ace-feedback-reader",
   "displayName": "Ace Feedback Reader",
-  "description": "A Markdown preview reader with annotation capabilities for AI feedback — highlight, comment, edit, and suggest deletions directly in preview.",
+  "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
   "version": "0.1.0",
+  "license": "MIT",
   "publisher": "ace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/41fred/ace-markdown-feedback"
+  },
+  "homepage": "https://github.com/41fred/ace-markdown-feedback#readme",
+  "bugs": {
+    "url": "https://github.com/41fred/ace-markdown-feedback/issues"
+  },
+  "keywords": [
+    "markdown",
+    "feedback",
+    "annotations",
+    "ai",
+    "code-review",
+    "preview"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
