@@ -1,10 +1,11 @@
 {
-  "name": "ace-feedback-reader",
-  "displayName": "Ace Feedback Reader",
+  "name": "ace-markdown-feedback",
+  "displayName": "Ace Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
   "version": "0.1.0",
   "license": "MIT",
-  "publisher": "ace",
+  "publisher": "AlfredNaayem",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/41fred/ace-markdown-feedback"
@@ -18,14 +19,18 @@
     "feedback",
     "annotations",
     "ai",
-    "code-review",
-    "preview"
+    "llm",
+    "claude",
+    "codex",
+    "ai-review",
+    "markdown-preview",
+    "annotation"
   ],
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Visualization"
   ],
   "activationEvents": [
     "onLanguage:markdown"
@@ -110,14 +115,8 @@
       }
     ],
     "configuration": {
-      "title": "Ace Feedback Reader",
+      "title": "Ace Markdown Feedback",
       "properties": {
-        "ace.theme": {
-          "type": "string",
-          "default": "auto",
-          "enum": ["auto", "light", "dark"],
-          "description": "Preview theme (auto follows VS Code theme)"
-        },
         "ace.highlightColor": {
           "type": "string",
           "default": "#fff3a0",
@@ -134,14 +133,12 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
-    "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   },
   "dependencies": {

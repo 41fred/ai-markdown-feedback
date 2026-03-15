@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import MarkdownIt from 'markdown-it';
 import { highlightPlugin, commentPlugin, editSuggestionPlugin, deletionPlugin } from './plugins';
 import { getWebviewContent } from './webview/template';
@@ -12,7 +13,7 @@ export class AcePreviewProvider {
 
   constructor(private readonly extensionUri: vscode.Uri) {
     this.md = new MarkdownIt({
-      html: true,
+      html: false,
       linkify: true,
       typographer: true,
     });
@@ -82,13 +83,6 @@ export class AcePreviewProvider {
       })
     );
 
-    // Handle messages from webview
-    this.panel.webview.onDidReceiveMessage(
-      (message) => this.handleWebviewMessage(message),
-      null,
-      this.disposables
-    );
-
     this.updatePreview();
   }
 
@@ -100,78 +94,14 @@ export class AcePreviewProvider {
     const config = vscode.workspace.getConfiguration('ace');
     const highlightColor = config.get<string>('highlightColor', '#fff3a0');
     const showGutter = config.get<boolean>('showAnnotationGutter', true);
+    const nonce = crypto.randomBytes(16).toString('base64');
 
     this.panel.webview.html = getWebviewContent({
       body: rendered,
       highlightColor,
       showGutter,
       cspSource: this.panel.webview.cspSource,
-    });
-  }
-
-  private async handleWebviewMessage(message: { type: string; text?: string; line?: number }): Promise<void> {
-    if (!this.document) { return; }
-
-    const editor = vscode.window.visibleTextEditors.find(
-      (e) => e.document.uri.toString() === this.document!.uri.toString()
-    );
-
-    switch (message.type) {
-      case 'insertHighlight':
-        if (editor && message.text) {
-          this.wrapSelection(editor, '==', '==');
-        }
-        break;
-      case 'insertComment':
-        if (editor) {
-          const comment = await vscode.window.showInputBox({
-            prompt: 'Enter your comment (visible to Claude, hidden in preview)',
-            placeHolder: 'Your feedback here...',
-          });
-          if (comment) {
-            this.insertAtCursor(editor, `%%${comment}%%`);
-          }
-        }
-        break;
-      case 'insertEdit':
-        if (editor) {
-          const suggestion = await vscode.window.showInputBox({
-            prompt: 'Enter edit suggestion',
-            placeHolder: 'Change X to Y',
-          });
-          if (suggestion) {
-            this.insertAtCursor(editor, `\n> [!EDIT] ${suggestion}\n`);
-          }
-        }
-        break;
-      case 'insertDelete':
-        if (editor && message.text) {
-          this.wrapSelection(editor, '~~', '~~');
-        }
-        break;
-      case 'scrollToLine':
-        if (editor && message.line !== undefined) {
-          const range = new vscode.Range(message.line, 0, message.line, 0);
-          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-        }
-        break;
-    }
-  }
-
-  private wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string): void {
-    const selection = editor.selection;
-    if (selection.isEmpty) { return; }
-
-    editor.edit((editBuilder) => {
-      const selectedText = editor.document.getText(selection);
-      editBuilder.replace(selection, `${prefix}${selectedText}${suffix}`);
-    });
-  }
-
-  private insertAtCursor(editor: vscode.TextEditor, text: string): void {
-    const position = editor.selection.active;
-    editor.edit((editBuilder) => {
-      editBuilder.insert(position, text);
+      nonce,
     });
   }
 

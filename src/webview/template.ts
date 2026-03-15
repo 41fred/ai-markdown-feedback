@@ -3,10 +3,11 @@ export interface WebviewOptions {
   highlightColor: string;
   showGutter: boolean;
   cspSource: string;
+  nonce: string;
 }
 
 export function getWebviewContent(options: WebviewOptions): string {
-  const { body, highlightColor, showGutter, cspSource } = options;
+  const { body, highlightColor, showGutter, cspSource, nonce } = options;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -16,7 +17,7 @@ export function getWebviewContent(options: WebviewOptions): string {
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'none';
     style-src ${cspSource} 'unsafe-inline';
-    script-src 'nonce-ace-script';
+    script-src 'nonce-${nonce}';
     img-src ${cspSource} https: data:;
     font-src ${cspSource};
   ">
@@ -201,45 +202,6 @@ export function getWebviewContent(options: WebviewOptions): string {
       opacity: 0.7;
     }
 
-    /* --- Annotation Toolbar --- */
-    #ace-toolbar {
-      position: fixed;
-      top: 8px;
-      right: 16px;
-      display: flex;
-      gap: 4px;
-      z-index: 1000;
-      background: var(--vscode-editorWidget-background, #252526);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      opacity: 0.6;
-      transition: opacity 0.2s;
-    }
-    #ace-toolbar:hover { opacity: 1; }
-
-    .ace-toolbar-btn {
-      background: none;
-      border: 1px solid transparent;
-      color: var(--fg);
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      white-space: nowrap;
-    }
-    .ace-toolbar-btn:hover {
-      background: var(--vscode-toolbar-hoverBackground, #333);
-      border-color: var(--border);
-    }
-    .ace-toolbar-btn span.label {
-      font-size: 11px;
-    }
-
     /* --- Annotation Summary Panel --- */
     #ace-summary {
       margin-top: 48px;
@@ -272,50 +234,14 @@ export function getWebviewContent(options: WebviewOptions): string {
   </style>
 </head>
 <body>
-  <div id="ace-toolbar">
-    <button class="ace-toolbar-btn" id="btn-highlight" title="Highlight selected text (==text==)">
-      🖍️ <span class="label">Highlight</span>
-    </button>
-    <button class="ace-toolbar-btn" id="btn-comment" title="Add comment (%%note%%)">
-      💬 <span class="label">Comment</span>
-    </button>
-    <button class="ace-toolbar-btn" id="btn-edit" title="Suggest edit (> [!EDIT])">
-      ✏️ <span class="label">Edit</span>
-    </button>
-    <button class="ace-toolbar-btn" id="btn-delete" title="Suggest deletion (~~text~~)">
-      🗑️ <span class="label">Delete</span>
-    </button>
-  </div>
-
   <div id="ace-content">
     ${body}
   </div>
 
   <div id="ace-summary"></div>
 
-  <script nonce="ace-script">
+  <script nonce="${nonce}">
     (function() {
-      const vscode = acquireVsCodeApi();
-
-      // Toolbar button handlers
-      document.getElementById('btn-highlight').addEventListener('click', () => {
-        vscode.postMessage({ type: 'insertHighlight', text: getSelectedText() });
-      });
-      document.getElementById('btn-comment').addEventListener('click', () => {
-        vscode.postMessage({ type: 'insertComment' });
-      });
-      document.getElementById('btn-edit').addEventListener('click', () => {
-        vscode.postMessage({ type: 'insertEdit' });
-      });
-      document.getElementById('btn-delete').addEventListener('click', () => {
-        vscode.postMessage({ type: 'insertDelete', text: getSelectedText() });
-      });
-
-      function getSelectedText() {
-        const selection = window.getSelection();
-        return selection ? selection.toString() : '';
-      }
-
       // Build annotation summary
       buildSummary();
 
