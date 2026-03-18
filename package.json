@@ -1,18 +1,18 @@
 {
-  "name": "ace-markdown-feedback",
-  "displayName": "Ace Markdown Feedback",
+  "name": "ai-markdown-feedback",
+  "displayName": "AI Markdown Feedback for LLMs",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/41fred/ace-markdown-feedback"
+    "url": "https://github.com/41fred/ai-markdown-feedback"
   },
-  "homepage": "https://github.com/41fred/ace-markdown-feedback#readme",
+  "homepage": "https://github.com/41fred/ai-markdown-feedback#readme",
   "bugs": {
-    "url": "https://github.com/41fred/ace-markdown-feedback/issues"
+    "url": "https://github.com/41fred/ai-markdown-feedback/issues"
   },
   "keywords": [
     "markdown",
@@ -35,94 +35,116 @@
   "activationEvents": [
     "onLanguage:markdown"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "aimd.previewEditor",
+        "displayName": "AI Markdown Preview",
+        "selector": [
+          { "filenamePattern": "*.md" }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
-        "command": "ace.openPreview",
-        "title": "Ace: Open Feedback Preview",
+        "command": "aimd.openPreview",
+        "title": "AI Markdown: Open Feedback Preview",
         "icon": {
           "light": "media/preview-light.svg",
           "dark": "media/preview-dark.svg"
         }
       },
       {
-        "command": "ace.insertHighlight",
-        "title": "Ace: Highlight Selection"
+        "command": "aimd.insertHighlight",
+        "title": "AI Markdown: Highlight Selection"
       },
       {
-        "command": "ace.insertComment",
-        "title": "Ace: Add Comment"
+        "command": "aimd.insertComment",
+        "title": "AI Markdown: Add Comment"
       },
       {
-        "command": "ace.insertEdit",
-        "title": "Ace: Suggest Edit"
+        "command": "aimd.insertEdit",
+        "title": "AI Markdown: Suggest Edit"
       },
       {
-        "command": "ace.insertDelete",
-        "title": "Ace: Suggest Deletion"
+        "command": "aimd.insertDelete",
+        "title": "AI Markdown: Suggest Deletion"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "when": "resourceLangId == markdown",
-          "command": "ace.openPreview",
+          "command": "aimd.openPreview",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "ace.insertHighlight",
-          "group": "ace@1"
+          "command": "aimd.insertHighlight",
+          "group": "aimd@1"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "ace.insertComment",
-          "group": "ace@2"
+          "command": "aimd.insertComment",
+          "group": "aimd@2"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "ace.insertEdit",
-          "group": "ace@3"
+          "command": "aimd.insertEdit",
+          "group": "aimd@3"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "ace.insertDelete",
-          "group": "ace@4"
+          "command": "aimd.insertDelete",
+          "group": "aimd@4"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "ace.openPreview",
-        "key": "ctrl+shift+v",
-        "mac": "cmd+shift+v",
+        "command": "aimd.openPreview",
+        "key": "ctrl+k ctrl+v",
+        "mac": "cmd+k cmd+v",
         "when": "resourceLangId == markdown"
       },
       {
-        "command": "ace.insertHighlight",
-        "key": "ctrl+shift+h",
-        "mac": "cmd+shift+h",
+        "command": "aimd.insertHighlight",
+        "key": "ctrl+k h",
+        "mac": "cmd+k h",
+        "when": "editorTextFocus && resourceLangId == markdown && editorHasSelection"
+      },
+      {
+        "command": "aimd.insertComment",
+        "key": "ctrl+k c",
+        "mac": "cmd+k c",
         "when": "editorTextFocus && resourceLangId == markdown"
       },
       {
-        "command": "ace.insertComment",
-        "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m",
+        "command": "aimd.insertEdit",
+        "key": "ctrl+k e",
+        "mac": "cmd+k e",
         "when": "editorTextFocus && resourceLangId == markdown"
+      },
+      {
+        "command": "aimd.insertDelete",
+        "key": "ctrl+k d",
+        "mac": "cmd+k d",
+        "when": "editorTextFocus && resourceLangId == markdown && editorHasSelection"
       }
     ],
     "configuration": {
-      "title": "Ace Markdown Feedback",
+      "title": "AI Markdown Feedback",
       "properties": {
-        "ace.highlightColor": {
+        "aimd.highlightColor": {
           "type": "string",
           "default": "#fff3a0",
           "description": "Background color for highlighted text"
         },
-        "ace.showAnnotationGutter": {
+        "aimd.showAnnotationGutter": {
           "type": "boolean",
           "default": true,
           "description": "Show annotation markers in the gutter"
@@ -131,14 +153,16 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run package",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.1",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "esbuild": "^0.27.4",
     "typescript": "^5.3.3"
   },
   "dependencies": {

@@ -202,6 +202,61 @@ export function getWebviewContent(options: WebviewOptions): string {
       opacity: 0.7;
     }
 
+    /* --- Floating Toolbar --- */
+    #ace-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      display: flex;
+      gap: 2px;
+      padding: 6px 8px;
+      margin: -16px -24px 16px -24px;
+      background: var(--vscode-titleBar-activeBackground, #2d2d2d);
+      border-bottom: 1px solid var(--border);
+    }
+    .ace-toolbar-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      position: relative;
+    }
+    .ace-toolbar-btn:hover {
+      background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
+      border-color: var(--border);
+    }
+    .ace-toolbar-btn:active {
+      background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,0.15));
+    }
+    .ace-toolbar-btn[data-needs-selection="true"].disabled {
+      opacity: 0.4;
+      cursor: default;
+      pointer-events: none;
+    }
+    .ace-toolbar-btn .ace-btn-icon {
+      font-size: 14px;
+      line-height: 1;
+    }
+    .ace-toolbar-btn .ace-btn-shortcut {
+      font-size: 10px;
+      opacity: 0.5;
+      margin-left: 2px;
+    }
+    .ace-toolbar-sep {
+      width: 1px;
+      background: var(--border);
+      margin: 2px 6px;
+      align-self: stretch;
+    }
+
     /* --- Annotation Summary Panel --- */
     #ace-summary {
       margin-top: 48px;
@@ -234,6 +289,30 @@ export function getWebviewContent(options: WebviewOptions): string {
   </style>
 </head>
 <body>
+  <div id="ace-toolbar">
+    <button class="ace-toolbar-btn" data-command="insertHighlight" data-needs-selection="true" data-key="h" title="Highlight selected text — press H in preview">
+      <span class="ace-btn-icon">&#x1F58D;&#xFE0F;</span>
+      <span>Highlight</span>
+      <span class="ace-btn-shortcut">H</span>
+    </button>
+    <button class="ace-toolbar-btn" data-command="insertComment" data-needs-selection="false" data-key="c" title="Add comment at cursor — press C in preview">
+      <span class="ace-btn-icon">&#x1F4AC;</span>
+      <span>Comment</span>
+      <span class="ace-btn-shortcut">C</span>
+    </button>
+    <button class="ace-toolbar-btn" data-command="insertEdit" data-needs-selection="false" data-key="e" title="Suggest an edit — press E in preview">
+      <span class="ace-btn-icon">&#x270F;&#xFE0F;</span>
+      <span>Edit</span>
+      <span class="ace-btn-shortcut">E</span>
+    </button>
+    <div class="ace-toolbar-sep"></div>
+    <button class="ace-toolbar-btn" data-command="insertDelete" data-needs-selection="true" data-key="d" title="Mark for deletion — press D in preview">
+      <span class="ace-btn-icon">&#x1F5D1;&#xFE0F;</span>
+      <span>Delete</span>
+      <span class="ace-btn-shortcut">D</span>
+    </button>
+  </div>
+
   <div id="ace-content">
     ${body}
   </div>
@@ -242,30 +321,165 @@ export function getWebviewContent(options: WebviewOptions): string {
 
   <script nonce="${nonce}">
     (function() {
-      // Build annotation summary
+      // Visible proof the script is running
+      document.body.style.borderTop = '3px solid lime';
+
+      const vscode = acquireVsCodeApi();
+      let previewRange = null;
+      let previewText = '';
+
+      // --- Selection mapping: preview DOM → source line ---
+      // We find the containing block element's source line, then send
+      // the selected text for the extension to find in the source.
+
+      document.addEventListener('selectionchange', syncPreviewSelection);
+
+      function syncPreviewSelection() {
+        var sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+          previewRange = null;
+          previewText = '';
+          updateToolbarState(false);
+          return;
+        }
+
+        var domRange = sel.getRangeAt(0);
+        var startEl = closestMappedElement(domRange.startContainer);
+        var endEl = closestMappedElement(domRange.endContainer);
+
+        if (!startEl) {
+          // Fallback: try #ace-content as container
+          startEl = document.getElementById('ace-content');
+          endEl = startEl;
+        }
+
+        var startLine = startEl ? Number(startEl.getAttribute('data-source-line')) || 1 : 1;
+        var endLine = endEl ? Number(endEl.getAttribute('data-source-end-line') || endEl.getAttribute('data-source-line')) || startLine : startLine;
+
+        previewRange = {
+          start: { line: startLine, column: 1 },
+          end: { line: endLine, column: 1 }
+        };
+        // Trim trailing/leading whitespace and newlines — browser selections
+        // often grab extra whitespace at block boundaries, table cells, etc.
+        previewText = sel.toString().replace(/^[\s\n]+|[\s\n]+$/g, '');
+        updateToolbarState(previewText.length > 0);
+      }
+
+      function closestMappedElement(node) {
+        var current = node;
+        while (current && current !== document.body) {
+          if (current instanceof HTMLElement && current.hasAttribute('data-source-line')) {
+            return current;
+          }
+          current = current.parentNode;
+        }
+        return null;
+      }
+
+      // --- Toolbar state ---
+
+      function updateToolbarState(hasSelection) {
+        document.querySelectorAll('.ace-toolbar-btn[data-needs-selection="true"]').forEach(function(btn) {
+          btn.classList.toggle('disabled', !hasSelection);
+        });
+      }
+
+      // --- Annotation command mapping ---
+
+      function commandToAnnotation(command) {
+        switch (command) {
+          case 'insertHighlight': return 'highlight';
+          case 'insertDelete': return 'delete';
+          case 'insertComment': return 'comment';
+          case 'insertEdit': return 'edit';
+          default: return null;
+        }
+      }
+
+      function sendAnnotation(command) {
+        var annotation = commandToAnnotation(command);
+        if (!annotation) {
+          showDebug('No annotation for command: ' + command);
+          return;
+        }
+
+        var needsSelection = command === 'insertHighlight' || command === 'insertDelete';
+        if (needsSelection && !previewRange) {
+          showDebug('No selection for: ' + command);
+          return;
+        }
+
+        showDebug('Sending: ' + annotation + ' | text: "' + (previewText || '').substring(0, 40) + '" | range: ' + JSON.stringify(previewRange));
+
+        vscode.postMessage({
+          type: 'preview.applyAnnotation',
+          annotation: annotation,
+          range: previewRange,
+          text: previewText,
+        });
+      }
+
+      function showDebug(msg) {
+        var el = document.getElementById('ace-debug');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = 'ace-debug';
+          el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1a1a2e;color:#0f0;font-family:monospace;font-size:11px;padding:6px 10px;z-index:9999;border-top:1px solid #333;max-height:80px;overflow-y:auto;';
+          document.body.appendChild(el);
+        }
+        el.textContent = msg;
+      }
+
+      // --- Toolbar button clicks ---
+
+      document.querySelectorAll('.ace-toolbar-btn[data-command]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          sendAnnotation(btn.getAttribute('data-command'));
+        });
+      });
+
+      // --- Single-key shortcuts (H/C/E/D) when preview has focus ---
+
+      document.addEventListener('keydown', function(e) {
+        // Cmd+Z / Ctrl+Z → undo
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+          e.preventDefault();
+          vscode.postMessage({ type: 'preview.undo' });
+          return;
+        }
+
+        // Ignore other modifier combos or input fields
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        var target = e.target;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+        var key = e.key.toLowerCase();
+        var btn = document.querySelector('.ace-toolbar-btn[data-key="' + key + '"]');
+        if (!btn) return;
+
+        e.preventDefault();
+        sendAnnotation(btn.getAttribute('data-command'));
+      });
+
+      // --- Annotation Summary ---
+
       buildSummary();
 
       function buildSummary() {
-        const summaryEl = document.getElementById('ace-summary');
-        const annotations = [];
+        var summaryEl = document.getElementById('ace-summary');
+        var annotations = [];
 
-        // Gather highlights
-        document.querySelectorAll('.ace-highlight').forEach(el => {
+        document.querySelectorAll('.ace-highlight').forEach(function(el) {
           annotations.push({ type: 'highlight', text: el.textContent });
         });
-
-        // Gather comments
-        document.querySelectorAll('.ace-comment').forEach(el => {
+        document.querySelectorAll('.ace-comment').forEach(function(el) {
           annotations.push({ type: 'comment', text: el.getAttribute('data-comment') });
         });
-
-        // Gather edit suggestions
-        document.querySelectorAll('.ace-edit-suggestion').forEach(el => {
+        document.querySelectorAll('.ace-edit-suggestion').forEach(function(el) {
           annotations.push({ type: 'edit', text: el.textContent.replace('Edit Suggestion', '').trim() });
         });
-
-        // Gather deletions
-        document.querySelectorAll('.ace-deletion').forEach(el => {
+        document.querySelectorAll('.ace-deletion').forEach(function(el) {
           annotations.push({ type: 'delete', text: el.textContent });
         });
 
@@ -274,10 +488,10 @@ export function getWebviewContent(options: WebviewOptions): string {
           return;
         }
 
-        let html = '<h3>Annotation Summary (' + annotations.length + ')</h3>';
-        annotations.forEach((a, i) => {
-          const icons = { highlight: '🖍️', comment: '💬', edit: '✏️', delete: '🗑️' };
-          const labels = { highlight: 'Highlight', comment: 'Comment', edit: 'Edit', delete: 'Delete' };
+        var html = '<h3>Annotation Summary (' + annotations.length + ')</h3>';
+        var icons = { highlight: '🖍️', comment: '💬', edit: '✏️', delete: '🗑️' };
+        var labels = { highlight: 'Highlight', comment: 'Comment', edit: 'Edit', delete: 'Delete' };
+        annotations.forEach(function(a) {
           html += '<div class="ace-summary-item">' +
             '<span class="ace-summary-type ' + a.type + '">' + icons[a.type] + ' ' + labels[a.type] + '</span>' +
             '<span>' + escapeHtml(a.text || '') + '</span>' +
@@ -289,7 +503,7 @@ export function getWebviewContent(options: WebviewOptions): string {
       }
 
       function escapeHtml(text) {
-        const div = document.createElement('div');
+        var div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
       }

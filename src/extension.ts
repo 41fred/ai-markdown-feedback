@@ -1,33 +1,49 @@
 import * as vscode from 'vscode';
-import { AcePreviewProvider } from './preview-provider';
+import { MarkdownPreviewEditorProvider, SidePanelPreviewProvider } from './preview-provider';
 
-let previewProvider: AcePreviewProvider;
+let sidePanelProvider: SidePanelPreviewProvider;
 
 export function activate(context: vscode.ExtensionContext) {
-  previewProvider = new AcePreviewProvider(context.extensionUri);
-
-  // Open preview command
+  // Register the custom editor (preview-only mode for .md files)
+  const editorProvider = new MarkdownPreviewEditorProvider(context);
   context.subscriptions.push(
-    vscode.commands.registerCommand('ace.openPreview', () => {
+    vscode.window.registerCustomEditorProvider(
+      MarkdownPreviewEditorProvider.viewType,
+      editorProvider,
+      {
+        webviewOptions: {
+          retainContextWhenHidden: true,
+          enableFindWidget: true,
+        },
+        supportsMultipleEditorsPerDocument: true,
+      }
+    )
+  );
+
+  // Side-panel preview (editor + preview side-by-side)
+  sidePanelProvider = new SidePanelPreviewProvider(context.extensionUri);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('aimd.openPreview', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === 'markdown') {
-        previewProvider.openPreview(editor.document);
+        sidePanelProvider.openPreview(editor.document);
       } else {
-        vscode.window.showWarningMessage('Ace: Open a Markdown file first.');
+        vscode.window.showWarningMessage('AI Markdown: Open a Markdown file first.');
       }
     })
   );
 
-  // Annotation insertion commands
+  // Annotation insertion commands (for use from the text editor)
   context.subscriptions.push(
-    vscode.commands.registerCommand('ace.insertHighlight', () => {
+    vscode.commands.registerCommand('aimd.insertHighlight', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) { wrapSelection(editor, '==', '=='); }
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('ace.insertComment', async () => {
+    vscode.commands.registerCommand('aimd.insertComment', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { return; }
 
@@ -46,7 +62,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('ace.insertEdit', async () => {
+    vscode.commands.registerCommand('aimd.insertEdit', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { return; }
 
@@ -65,16 +81,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('ace.insertDelete', () => {
+    vscode.commands.registerCommand('aimd.insertDelete', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) { wrapSelection(editor, '~~', '~~'); }
-    })
-  );
-
-  // Auto-open preview for markdown files if desired
-  context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((doc) => {
-      // Could auto-open preview here if config enables it
     })
   );
 }
@@ -82,7 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
 function wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string): void {
   const selection = editor.selection;
   if (selection.isEmpty) {
-    vscode.window.showInformationMessage('Ace: Select text first, then apply annotation.');
+    vscode.window.showInformationMessage('AI Markdown: Select text first, then apply annotation.');
     return;
   }
 
@@ -93,5 +102,5 @@ function wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string
 }
 
 export function deactivate() {
-  previewProvider?.dispose();
+  sidePanelProvider?.dispose();
 }

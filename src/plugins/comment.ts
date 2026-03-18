@@ -43,9 +43,14 @@ export function commentPlugin(md: MarkdownIt): void {
     return true;
   });
 
-  md.renderer.rules['ace_comment'] = (tokens, idx) => {
-    const content = md.utils.escapeHtml(tokens[idx].content);
-    return `<span class="ace-comment" title="${content}" data-comment="${content}">` +
+  md.renderer.rules['ace_comment'] = (tokens, idx, options, env, self) => {
+    const token = tokens[idx];
+    const content = md.utils.escapeHtml(token.content);
+    // Emit sourcemap attributes from the token
+    const sourceLine = token.attrGet('data-source-line') || '';
+    const sourcePos = token.attrGet('data-source-pos') || '';
+    const sourceAttrs = sourceLine ? ` data-source-line="${sourceLine}" data-source-pos="${sourcePos}"` : '';
+    return `<span class="ace-comment" title="${content}" data-comment="${content}"${sourceAttrs}>` +
       `<span class="ace-comment-icon">💬</span>` +
       `<span class="ace-comment-text">${content}</span>` +
       `</span>`;
