@@ -16,6 +16,31 @@ interface SourceRange {
   end: SourcePoint;
 }
 
+// --- Shared edit + auto-save ---
+
+// Store active webview panels so we can send messages back (e.g., "Saved" indicator)
+const activeWebviews: Set<vscode.Webview> = new Set();
+
+async function applyWorkspaceEditAndSave(
+  document: vscode.TextDocument,
+  edit: vscode.WorkspaceEdit,
+): Promise<boolean> {
+  const applied = await vscode.workspace.applyEdit(edit);
+  if (!applied) { return false; }
+
+  const config = vscode.workspace.getConfiguration('acemd', document.uri);
+  const autoSave = config.get<boolean>('autoSaveAnnotations', true);
+  if (autoSave) {
+    await document.save();
+    // Notify all active previews to show "Saved" flash
+    for (const webview of activeWebviews) {
+      webview.postMessage({ type: 'extension.saved' });
+    }
+  }
+
+  return true;
+}
+
 // --- Shared annotation logic ---
 
 /**
@@ -50,33 +75,84 @@ function cleanSelectionText(text: string): string {
 }
 
 /**
+ * Build all text variants to try when searching (exact, cleaned, typographer-reversed).
+ */
+function buildSearchVariants(selectedText: string): string[] {
+  const cleaned = cleanSelectionText(selectedText);
+  const reversed = reverseTypographer(selectedText);
+  const cleanedReversed = reverseTypographer(cleaned);
+  return [...new Set(
+    [selectedText, cleaned, reversed, cleanedReversed].filter((v) => v.length > 0)
+  )];
+}
+
+const VISIBLE_MARKERS = ['==', '~~'];
+
+/**
+ * Strip annotation markers from source text while tracking position mapping.
+ */
+function stripMarkersWithMap(sourceText: string, marker: string): { text: string; rawIndexMap: number[] } {
+  let text = '';
+  const rawIndexMap: number[] = [];
+  for (let i = 0; i < sourceText.length;) {
+    if (sourceText.slice(i, i + marker.length) === marker) {
+      i += marker.length;
+      continue;
+    }
+    rawIndexMap.push(i);
+    text += sourceText[i];
+    i += 1;
+  }
+  return { text, rawIndexMap };
+}
+
+/**
+ * Expand match boundaries to include adjacent annotation markers.
+ */
+function expandToAdjacentMarkers(sourceText: string, start: number, end: number, marker: string): { idx: number; matchText: string } {
+  let rawStart = start;
+  let rawEnd = end;
+  if (rawStart >= marker.length && sourceText.slice(rawStart - marker.length, rawStart) === marker) {
+    rawStart -= marker.length;
+  }
+  if (sourceText.slice(rawEnd, rawEnd + marker.length) === marker) {
+    rawEnd += marker.length;
+  }
+  return { idx: rawStart, matchText: sourceText.slice(rawStart, rawEnd) };
+}
+
+/**
  * Try multiple strategies to find selectedText in sourceText.
- * Returns the index and the matched text, or -1 if not found.
+ * Marker-aware: finds text even when it has ==, ~~ markers around/within it.
  */
 function findTextInSource(selectedText: string, sourceText: string): { idx: number; matchText: string } {
-  // 1. Exact match
-  let idx = sourceText.indexOf(selectedText);
-  if (idx >= 0) { return { idx, matchText: selectedText }; }
+  const variants = buildSearchVariants(selectedText);
 
-  // 2. Cleaned (strip rendering artifacts)
-  const cleaned = cleanSelectionText(selectedText);
-  if (cleaned !== selectedText && cleaned.length > 0) {
-    idx = sourceText.indexOf(cleaned);
-    if (idx >= 0) { return { idx, matchText: cleaned }; }
+  // 1. Try finding text with markers already wrapped around it
+  for (const marker of VISIBLE_MARKERS) {
+    for (const variant of variants) {
+      const wrapped = marker + variant + marker;
+      const idx = sourceText.indexOf(wrapped);
+      if (idx >= 0) { return { idx, matchText: wrapped }; }
+    }
   }
 
-  // 3. Typographer-reversed
-  const reversed = reverseTypographer(selectedText);
-  if (reversed !== selectedText) {
-    idx = sourceText.indexOf(reversed);
-    if (idx >= 0) { return { idx, matchText: reversed }; }
+  // 2. Try matching against marker-stripped source (handles partial markers within selection)
+  for (const marker of VISIBLE_MARKERS) {
+    const { text, rawIndexMap } = stripMarkersWithMap(sourceText, marker);
+    for (const variant of variants) {
+      const idx = text.indexOf(variant);
+      if (idx < 0 || idx + variant.length - 1 >= rawIndexMap.length) { continue; }
+      const rawStart = rawIndexMap[idx];
+      const rawEnd = rawIndexMap[idx + variant.length - 1] + 1;
+      return expandToAdjacentMarkers(sourceText, rawStart, rawEnd, marker);
+    }
   }
 
-  // 4. Cleaned + typographer-reversed
-  const cleanedReversed = reverseTypographer(cleaned);
-  if (cleanedReversed !== cleaned && cleanedReversed !== reversed) {
-    idx = sourceText.indexOf(cleanedReversed);
-    if (idx >= 0) { return { idx, matchText: cleanedReversed }; }
+  // 3. Plain text match (no markers involved)
+  for (const variant of variants) {
+    const idx = sourceText.indexOf(variant);
+    if (idx >= 0) { return { idx, matchText: variant }; }
   }
 
   return { idx: -1, matchText: selectedText };
@@ -198,7 +274,7 @@ async function applyAnnotationAtLine(
   }
 
   await ensureAnnotationHeader(document, edit);
-  await vscode.workspace.applyEdit(edit);
+  await applyWorkspaceEditAndSave(document, edit);
 }
 
 async function applyEdit(
@@ -214,13 +290,19 @@ async function applyEdit(
   const edit = new vscode.WorkspaceEdit();
 
   switch (annotation) {
-    case 'highlight':
-      edit.replace(document.uri, matchRange, `==${actualText}==`);
+    case 'highlight': {
+      // Strip any existing highlight markers to prevent nesting
+      const cleaned = actualText.replace(/==/g, '');
+      edit.replace(document.uri, matchRange, `==${cleaned}==`);
       break;
+    }
 
-    case 'delete':
-      edit.replace(document.uri, matchRange, `~~${actualText}~~`);
+    case 'delete': {
+      // Strip any existing deletion markers to prevent nesting
+      const cleaned = actualText.replace(/~~/g, '');
+      edit.replace(document.uri, matchRange, `~~${cleaned}~~`);
       break;
+    }
 
     case 'comment': {
       const comment = await vscode.window.showInputBox({
@@ -246,7 +328,7 @@ async function applyEdit(
   // Inject the annotation header if this is the first annotation in the file
   await ensureAnnotationHeader(document, edit);
 
-  await vscode.workspace.applyEdit(edit);
+  await applyWorkspaceEditAndSave(document, edit);
 }
 
 /**
@@ -266,18 +348,82 @@ These markers are intentional — do not remove or "clean up" without asking the
 
 const HEADER_MARKER = '<!-- AI Markdown Feedback:';
 
+// Track documents that already have a pending header insertion in the current edit cycle.
+// This prevents duplicate headers when multiple annotations are applied rapidly.
+const pendingHeaderInserts = new Set<string>();
+
 /**
  * If the document doesn't already have the annotation header, add it.
- * If all annotations are removed, remove the header too.
+ * Guards against duplicate inserts from concurrent edits.
  */
 function ensureAnnotationHeader(document: vscode.TextDocument, edit: vscode.WorkspaceEdit): void {
+  const uri = document.uri.toString();
   const text = document.getText();
   const hasHeader = text.includes(HEADER_MARKER);
 
-  if (!hasHeader) {
-    // Insert at the very top of the file
+  if (!hasHeader && !pendingHeaderInserts.has(uri)) {
+    pendingHeaderInserts.add(uri);
     edit.insert(document.uri, new vscode.Position(0, 0), ANNOTATION_HEADER + '\n\n');
+    // Clear the pending flag after the edit is applied
+    setTimeout(() => pendingHeaderInserts.delete(uri), 500);
   }
+}
+
+// --- Clear All Annotations ---
+
+export function clearAllAnnotations(text: string): string {
+  // Remove ALL annotation header copies (handles duplicates)
+  let next = text;
+  while (next.includes(HEADER_MARKER)) {
+    next = next.replace(/<!-- AI Markdown Feedback:[\s\S]*?-->\r?\n?\r?\n?/, '');
+  }
+
+  // Fixed-point loop for nested markers (e.g., ==~~text~~==)
+  let prev;
+  do {
+    prev = next;
+    // Use non-greedy matching within single lines to avoid eating across table rows
+    next = next.replace(/==([^=\n]*?)==/g, '$1');
+    next = next.replace(/~~([^~\n]*?)~~/g, '$1');
+    // Comments: strip %% markers and content, preserve surrounding structure
+    next = next.replace(/ ?%%[^%]*?%% ?/g, '');
+  } while (next !== prev);
+
+  // Remove > [!EDIT] callout blocks (single or multi-line)
+  next = next.replace(/^> \[!EDIT\][^\n]*(?:\n>[^\n]*)*/gm, '');
+
+  // Clean up extra blank lines but preserve table structure
+  next = next.replace(/\n{3,}/g, '\n\n');
+
+  return next.trimEnd() + '\n';
+}
+
+export async function clearAllAnnotationsInDocument(document: vscode.TextDocument): Promise<void> {
+  const text = document.getText();
+  const cleaned = clearAllAnnotations(text);
+
+  if (cleaned === text) {
+    vscode.window.showInformationMessage('Ace: No annotations to clear.');
+    return;
+  }
+
+  const confirm = await vscode.window.showWarningMessage(
+    'Ace: Remove all annotations from this file? This can be undone with Cmd+Z.',
+    { modal: false },
+    'Clear All',
+  );
+  if (confirm !== 'Clear All') { return; }
+
+  const fullRange = new vscode.Range(
+    document.positionAt(0),
+    document.positionAt(text.length),
+  );
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(document.uri, fullRange, cleaned);
+  await applyWorkspaceEditAndSave(document, edit);
+
+  vscode.window.showInformationMessage('Ace: All annotations cleared.');
 }
 
 // --- Shared markdown-it setup ---
@@ -301,7 +447,7 @@ function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vs
   // Strip the annotation header before rendering — it's for LLMs, not the preview
   const source = document.getText().replace(/<!-- AI Markdown Feedback:[\s\S]*?-->\n?\n?/, '');
   const rendered = md.render(source);
-  const config = vscode.workspace.getConfiguration('aimd');
+  const config = vscode.workspace.getConfiguration('acemd');
   const highlightColor = config.get<string>('highlightColor', '#fff3a0');
   const showGutter = config.get<boolean>('showAnnotationGutter', true);
   const nonce = crypto.randomBytes(16).toString('hex');
@@ -364,13 +510,18 @@ export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorPro
             }
           }
           return;
+        case 'preview.clearAllAnnotations':
+          await clearAllAnnotationsInDocument(document);
+          return;
         case 'preview.undo':
           await vscode.commands.executeCommand('undo');
           return;
       }
     });
 
+    activeWebviews.add(webviewPanel.webview);
     webviewPanel.onDidDispose(() => {
+      activeWebviews.delete(webviewPanel.webview);
       changeSub.dispose();
       msgSub.dispose();
     });
@@ -421,7 +572,9 @@ export class SidePanelPreviewProvider {
       dark: vscode.Uri.joinPath(this.extensionUri, 'media', 'preview-dark.svg'),
     };
 
+    activeWebviews.add(this.panel.webview);
     this.panel.onDidDispose(() => {
+      if (this.panel) { activeWebviews.delete(this.panel.webview); }
       this.panel = undefined;
       this.disposeListeners();
     }, null, this.disposables);
@@ -450,9 +603,17 @@ export class SidePanelPreviewProvider {
 
         switch (message.type) {
           case 'preview.applyAnnotation':
-            if (message.range && message.text) {
-              await applyAnnotation(this.document, message.annotation, message.range, message.text);
+            if (message.range) {
+              if (message.text) {
+                await applyAnnotation(this.document, message.annotation, message.range, message.text);
+              } else if (message.annotation === 'comment' || message.annotation === 'edit') {
+                await applyAnnotationAtLine(this.document, message.annotation, message.range);
+              }
             }
+            return;
+
+          case 'preview.clearAllAnnotations':
+            await clearAllAnnotationsInDocument(this.document);
             return;
 
           case 'preview.undo':

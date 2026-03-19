@@ -2,7 +2,7 @@
   "name": "ai-markdown-feedback",
   "displayName": "Ace: AI Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",
@@ -71,6 +71,10 @@
       {
         "command": "acemd.insertDelete",
         "title": "Ace: Suggest Deletion"
+      },
+      {
+        "command": "acemd.clearAllAnnotations",
+        "title": "Ace: Clear All Annotations"
       }
     ],
     "menus": {
@@ -137,7 +141,7 @@
       }
     ],
     "configuration": {
-      "title": "AI Markdown Feedback",
+      "title": "Ace: AI Markdown Feedback",
       "properties": {
         "acemd.highlightColor": {
           "type": "string",
@@ -148,6 +152,26 @@
           "type": "boolean",
           "default": true,
           "description": "Show annotation markers in the gutter"
+        },
+        "acemd.autoSaveAnnotations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save the file after each annotation is applied from the preview"
+        },
+        "acemd.autoOpenPreview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open the Ace preview when a Markdown file becomes active"
+        },
+        "acemd.autoOpenMode": {
+          "type": "string",
+          "enum": ["side", "replace"],
+          "default": "side",
+          "enumDescriptions": [
+            "Open a side-by-side preview next to the editor",
+            "Replace the editor with a preview-only view (no code visible)"
+          ],
+          "description": "How auto-open preview behaves: side-by-side or preview-only"
         }
       }
     }

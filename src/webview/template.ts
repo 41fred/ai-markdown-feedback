@@ -257,6 +257,21 @@ export function getWebviewContent(options: WebviewOptions): string {
       align-self: stretch;
     }
 
+    /* --- Saved indicator --- */
+    #ace-saved {
+      display: none;
+      align-items: center;
+      margin-left: auto;
+      font-size: 11px;
+      color: #4caf50;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #ace-saved.show {
+      display: flex;
+      opacity: 1;
+    }
+
     /* --- Annotation Summary Panel --- */
     #ace-summary {
       margin-top: 48px;
@@ -311,6 +326,12 @@ export function getWebviewContent(options: WebviewOptions): string {
       <span>Delete</span>
       <span class="ace-btn-shortcut">D</span>
     </button>
+    <div class="ace-toolbar-sep"></div>
+    <button class="ace-toolbar-btn" data-command="clearAllAnnotations" data-needs-selection="false" title="Clear all annotations in this file">
+      <span class="ace-btn-icon">&#x2716;</span>
+      <span>Clear All</span>
+    </button>
+    <span id="ace-saved">Saved</span>
   </div>
 
   <div id="ace-content">
@@ -425,9 +446,17 @@ export function getWebviewContent(options: WebviewOptions): string {
 
       // --- Toolbar button clicks ---
 
+      function sendCommand(command) {
+        if (command === 'clearAllAnnotations') {
+          vscode.postMessage({ type: 'preview.clearAllAnnotations' });
+          return;
+        }
+        sendAnnotation(command);
+      }
+
       document.querySelectorAll('.ace-toolbar-btn[data-command]').forEach(function(btn) {
         btn.addEventListener('click', function() {
-          sendAnnotation(btn.getAttribute('data-command'));
+          sendCommand(btn.getAttribute('data-command'));
         });
       });
 
@@ -451,7 +480,19 @@ export function getWebviewContent(options: WebviewOptions): string {
         if (!btn) return;
 
         e.preventDefault();
-        sendAnnotation(btn.getAttribute('data-command'));
+        sendCommand(btn.getAttribute('data-command'));
+      });
+
+      // --- Listen for messages from extension ---
+      window.addEventListener('message', function(event) {
+        var msg = event.data;
+        if (msg.type === 'extension.saved') {
+          var el = document.getElementById('ace-saved');
+          if (el) {
+            el.classList.add('show');
+            setTimeout(function() { el.classList.remove('show'); }, 1500);
+          }
+        }
       });
 
       // --- Annotation Summary ---

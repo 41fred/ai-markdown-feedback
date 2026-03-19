@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { MarkdownPreviewEditorProvider, SidePanelPreviewProvider } from './preview-provider';
+import { MarkdownPreviewEditorProvider, SidePanelPreviewProvider, clearAllAnnotationsInDocument } from './preview-provider';
 
 let sidePanelProvider: SidePanelPreviewProvider;
 
@@ -84,6 +84,46 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('acemd.insertDelete', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) { wrapSelection(editor, '~~', '~~'); }
+    })
+  );
+
+  // Clear all annotations (works from editor tab)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('acemd.clearAllAnnotations', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== 'markdown') {
+        vscode.window.showWarningMessage('Ace: Open a Markdown file first.');
+        return;
+      }
+      await clearAllAnnotationsInDocument(editor.document);
+    })
+  );
+
+  // Auto-open preview
+  let lastAutoOpenedKey: string | undefined;
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+      if (!editor || editor.document.languageId !== 'markdown') { return; }
+
+      const config = vscode.workspace.getConfiguration('acemd', editor.document.uri);
+      if (!config.get<boolean>('autoOpenPreview', false)) { return; }
+
+      const mode = config.get<'side' | 'replace'>('autoOpenMode', 'side');
+      const key = `${mode}:${editor.document.uri.toString()}`;
+      if (key === lastAutoOpenedKey) { return; }
+
+      lastAutoOpenedKey = key;
+
+      if (mode === 'replace') {
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          editor.document.uri,
+          MarkdownPreviewEditorProvider.viewType,
+        );
+        return;
+      }
+
+      await sidePanelProvider.openPreview(editor.document);
     })
   );
 }
