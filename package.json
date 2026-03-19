@@ -2,7 +2,7 @@
   "name": "ai-markdown-feedback",
   "displayName": "Ace: AI Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",

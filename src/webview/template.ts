@@ -350,14 +350,42 @@ export function getWebviewContent(options: WebviewOptions): string {
       // We find the containing block element's source line, then send
       // the selected text for the extension to find in the source.
 
-      document.addEventListener('selectionchange', syncPreviewSelection);
+      var syncTimer = null;
+      var SYNC_DELAY = 30;
+      var DBLCLICK_DELAY = 80;
+
+      document.addEventListener('selectionchange', scheduleSyncPreviewSelection);
+      document.addEventListener('mouseup', scheduleSyncPreviewSelection);
+      document.addEventListener('keyup', scheduleSyncPreviewSelection);
+
+      // Double-click word selection: the browser may not finalize it by the
+      // time selectionchange fires. Use a longer delay to let it settle.
+      document.addEventListener('dblclick', function() {
+        if (syncTimer) { clearTimeout(syncTimer); }
+        syncTimer = setTimeout(syncPreviewSelection, DBLCLICK_DELAY);
+      });
+
+      function scheduleSyncPreviewSelection() {
+        if (syncTimer) { clearTimeout(syncTimer); }
+        // Defer so the browser finalizes the selection first
+        syncTimer = setTimeout(syncPreviewSelection, SYNC_DELAY);
+      }
 
       function syncPreviewSelection() {
+        syncTimer = null;
+
         var sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        if (!sel || sel.rangeCount === 0) {
           previewRange = null;
           previewText = '';
           updateToolbarState(false);
+          return;
+        }
+
+        // Keep the last good selection during transient collapsed states
+        // (e.g., mousedown before double-click word select fires)
+        if (sel.isCollapsed) {
+          updateToolbarState(Boolean(previewRange && previewText));
           return;
         }
 
@@ -372,8 +400,8 @@ export function getWebviewContent(options: WebviewOptions): string {
         }
 
         previewRange = {
-          start: readSourcePoint(startEl, false),
-          end: readSourcePoint(endEl, true)
+          start: readSourcePointFromDom(startEl, domRange.startContainer, domRange.startOffset, false),
+          end: readSourcePointFromDom(endEl, domRange.endContainer, domRange.endOffset, true)
         };
         // Trim trailing/leading whitespace — browser selections
         // often grab extra whitespace at block boundaries, table cells, etc.
@@ -381,30 +409,57 @@ export function getWebviewContent(options: WebviewOptions): string {
         updateToolbarState(previewText.length > 0);
       }
 
-      function readSourcePoint(el, isEnd) {
+      /**
+       * Read source line/column from a mapped element, using DOM Range to
+       * compute the character offset within the element for sub-cell precision.
+       */
+      function readSourcePointFromDom(el, container, offset, isEnd) {
         if (!el) return { line: 1, column: 1 };
-        var line = Number(el.getAttribute('data-source-line')) || 1;
-        if (!isEnd) {
-          var endLine = Number(el.getAttribute('data-source-end-line'));
-          if (endLine) line = isEnd ? endLine : line;
-        }
+
+        var startLine = Number(el.getAttribute('data-source-line')) || 1;
+        var endLine = Number(el.getAttribute('data-source-end-line')) || startLine;
+        var line = isEnd ? endLine : startLine;
+
         var pos = el.getAttribute('data-source-pos');
         if (pos) {
           var parts = pos.split(':').map(Number);
-          return { line: line, column: isEnd ? (parts[1] || 1) : (parts[0] || 1) };
+          var startCol = parts[0] || 1;
+          var endCol = parts[1] || startCol;
+
+          // Compute character offset within the element's rendered text.
+          // This gives sub-element precision (e.g., which "Your" in a table cell).
+          try {
+            var r = document.createRange();
+            r.selectNodeContents(el);
+            r.setEnd(container, offset);
+            var delta = r.toString().length;
+            return { line: line, column: Math.min(endCol, startCol + delta) };
+          } catch (e) {
+            return { line: line, column: isEnd ? endCol : startCol };
+          }
         }
+
         return { line: line, column: 1 };
       }
 
       function closestMappedElement(node) {
         var current = node;
+        var fallback = null;
+
         while (current && current !== document.body) {
-          if (current instanceof HTMLElement && current.hasAttribute('data-source-line')) {
-            return current;
+          if (current instanceof HTMLElement) {
+            // Prefer elements with column-level mapping (e.g., table cells)
+            if (current.hasAttribute('data-source-pos')) {
+              return current;
+            }
+            if (!fallback && current.hasAttribute('data-source-line')) {
+              fallback = current;
+            }
           }
           current = current.parentNode;
         }
-        return null;
+
+        return fallback;
       }
 
       // --- Toolbar state ---
@@ -467,6 +522,10 @@ export function getWebviewContent(options: WebviewOptions): string {
       }
 
       document.querySelectorAll('.ace-toolbar-btn[data-command]').forEach(function(btn) {
+        // Prevent mousedown from collapsing the current selection
+        btn.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+        });
         btn.addEventListener('click', function() {
           sendCommand(btn.getAttribute('data-command'));
         });

@@ -59,6 +59,18 @@ function reverseTypographer(text: string): string {
 }
 
 /**
+ * Reverse only smart quotes (not dashes/ellipsis). Needed when the source
+ * already contains em dashes but typographer only transformed the quotes.
+ */
+function reverseQuotesOnly(text: string): string {
+  return text
+    .replace(/\u2018/g, "'")
+    .replace(/\u2019/g, "'")
+    .replace(/\u201C/g, '"')
+    .replace(/\u201D/g, '"');
+}
+
+/**
  * Clean up browser selection text that includes rendering artifacts.
  * Strips emoji icons our extension adds, extra whitespace, etc.
  */
@@ -68,21 +80,26 @@ function cleanSelectionText(text: string): string {
     .replace(/[\u{1F4AC}\u{1F58D}\u{270F}\u{1F5D1}\u{1F4CC}]\uFE0F?/gu, '')
     // Strip common emoji that leak from our UI
     .replace(/[\u{2328}\u{FE0F}]/gu, '')
-    // Collapse multiple spaces/tabs to single space
-    .replace(/[ \t]+/g, ' ')
+    // Collapse all whitespace (spaces, tabs, newlines) to single space
+    // Browser selections join lines with spaces; source has \n
+    .replace(/\s+/g, ' ')
     // Trim whitespace
     .trim();
 }
 
 /**
  * Build all text variants to try when searching (exact, cleaned, typographer-reversed).
+ * Includes quotes-only reversal for sources that already have em dashes.
  */
 function buildSearchVariants(selectedText: string): string[] {
   const cleaned = cleanSelectionText(selectedText);
   const reversed = reverseTypographer(selectedText);
   const cleanedReversed = reverseTypographer(cleaned);
+  const quotesOnly = reverseQuotesOnly(selectedText);
+  const cleanedQuotesOnly = reverseQuotesOnly(cleaned);
   return [...new Set(
-    [selectedText, cleaned, reversed, cleanedReversed].filter((v) => v.length > 0)
+    [selectedText, cleaned, reversed, cleanedReversed, quotesOnly, cleanedQuotesOnly]
+      .filter((v) => v.length > 0)
   )];
 }
 
@@ -94,6 +111,8 @@ const ALL_INLINE_MARKERS = ['==', '~~', '**', '__', '%%'];
 /**
  * Strip markdown inline markers from source text while tracking position mapping.
  * Handles: ==, ~~, **, __, %%, and single *, _, `
+ * Also normalizes newlines to spaces so browser selection text (which joins
+ * lines with spaces) can match multi-line source content.
  */
 function stripMarkdownWithMap(sourceText: string): { text: string; rawIndexMap: number[] } {
   const rawIndexMap: number[] = [];
@@ -116,8 +135,17 @@ function stripMarkdownWithMap(sourceText: string): { text: string; rawIndexMap: 
       continue;
     }
 
+    // Normalize newlines to spaces — browser selection joins lines with spaces.
+    // Also collapse consecutive whitespace so blank lines (two newlines)
+    // match the single space that cleanSelectionText produces.
+    const normalized = (ch === '\n' || ch === '\r') ? ' ' : ch;
+    if (normalized === ' ' && text.length > 0 && text[text.length - 1] === ' ') {
+      // Skip consecutive whitespace — don't add to text or rawIndexMap
+      i += 1;
+      continue;
+    }
     rawIndexMap.push(i);
-    text += ch;
+    text += normalized;
     i += 1;
   }
 
@@ -143,6 +171,45 @@ function stripMarkersWithMap(sourceText: string, marker: string): { text: string
 }
 
 /**
+ * Expand match boundaries so that backtick-delimited code spans are not
+ * split in half. If the matched slice contains an odd number of backticks,
+ * the boundary is extended to the nearest backtick that balances it.
+ */
+function expandToBalancedBackticks(sourceText: string, start: number, end: number): { start: number; end: number } {
+  let s = start;
+  let e = end;
+
+  // Pull in an adjacent backtick that sits right at the boundary
+  if (s > 0 && sourceText[s - 1] === '`') { s--; }
+  if (e < sourceText.length && sourceText[e] === '`') { e++; }
+
+  // Count backticks in the slice
+  let ticks = 0;
+  for (let i = s; i < e; i++) { if (sourceText[i] === '`') { ticks++; } }
+  if (ticks % 2 === 0) { return { start: s, end: e }; }
+
+  // Unbalanced — expand toward the nearest missing backtick
+  const leftTick = sourceText.lastIndexOf('`', s - 1);
+  const rightTick = sourceText.indexOf('`', e);
+
+  // Determine which direction has the unmatched backtick
+  if (leftTick >= 0 && rightTick >= 0) {
+    // Expand toward the closer one
+    if (s - leftTick <= rightTick - e + 1) {
+      s = leftTick;
+    } else {
+      e = rightTick + 1;
+    }
+  } else if (leftTick >= 0) {
+    s = leftTick;
+  } else if (rightTick >= 0) {
+    e = rightTick + 1;
+  }
+
+  return { start: s, end: e };
+}
+
+/**
  * Expand match boundaries to include adjacent annotation markers.
  */
 function expandToAdjacentMarkers(sourceText: string, start: number, end: number, marker: string): { idx: number; matchText: string } {
@@ -158,18 +225,59 @@ function expandToAdjacentMarkers(sourceText: string, start: number, end: number,
 }
 
 /**
+ * Find the occurrence of `search` in `text` nearest to `hint` offset.
+ * Returns -1 if not found.
+ */
+function indexOfNearest(text: string, search: string, hint: number): number {
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  let start = 0;
+  while (true) {
+    const idx = text.indexOf(search, start);
+    if (idx < 0) { break; }
+    const dist = Math.abs(idx - hint);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = idx;
+    }
+    start = idx + 1;
+  }
+  return bestIdx;
+}
+
+/**
  * Try multiple strategies to find selectedText in sourceText.
  * Marker-aware: finds text even when it has ==, ~~ markers around/within it.
+ *
+ * When hintOffset is provided (e.g., column position from table cell mapping),
+ * finds the occurrence nearest to that offset instead of the first occurrence.
+ * This disambiguates when the same text appears multiple times on a line.
  */
-function findTextInSource(selectedText: string, sourceText: string): { idx: number; matchText: string } {
+function findTextInSource(selectedText: string, sourceText: string, hintOffset?: number): { idx: number; matchText: string } {
   const variants = buildSearchVariants(selectedText);
+  const useHint = hintOffset !== undefined && hintOffset > 0;
 
-  // 1. Try finding text with annotation markers already wrapped around it
+  function bestIndexOf(haystack: string, needle: string): number {
+    return useHint ? indexOfNearest(haystack, needle, hintOffset!) : haystack.indexOf(needle);
+  }
+
+  // 1. Try finding text with annotation markers already wrapped around it.
+  // When a hint is provided, only accept the wrapped match if it's near the hint.
+  // Otherwise an already-annotated "==word==" elsewhere steals the match from
+  // the plain "word" the user actually selected.
   for (const marker of ANNOTATION_MARKERS) {
     for (const variant of variants) {
       const wrapped = marker + variant + marker;
-      const idx = sourceText.indexOf(wrapped);
-      if (idx >= 0) { return { idx, matchText: wrapped }; }
+      const idx = bestIndexOf(sourceText, wrapped);
+      if (idx >= 0) {
+        if (useHint) {
+          const dist = Math.abs(idx - hintOffset!);
+          // Only accept if the wrapped match is close to where the user clicked.
+          // Allow some slack for marker characters + cell padding.
+          if (dist > variant.length + 20) { continue; }
+        }
+        return { idx, matchText: wrapped };
+      }
     }
   }
 
@@ -177,7 +285,7 @@ function findTextInSource(selectedText: string, sourceText: string): { idx: numb
   for (const marker of ANNOTATION_MARKERS) {
     const { text, rawIndexMap } = stripMarkersWithMap(sourceText, marker);
     for (const variant of variants) {
-      const idx = text.indexOf(variant);
+      const idx = bestIndexOf(text, variant);
       if (idx < 0 || idx + variant.length - 1 >= rawIndexMap.length) { continue; }
       const rawStart = rawIndexMap[idx];
       const rawEnd = rawIndexMap[idx + variant.length - 1] + 1;
@@ -187,20 +295,23 @@ function findTextInSource(selectedText: string, sourceText: string): { idx: numb
 
   // 3. Plain text match (no markers involved)
   for (const variant of variants) {
-    const idx = sourceText.indexOf(variant);
+    const idx = bestIndexOf(sourceText, variant);
     if (idx >= 0) { return { idx, matchText: variant }; }
   }
 
   // 4. Markdown-aware match: strip ALL inline markers (**, __, *, _, `, ==, ~~, %%)
-  // This handles cases like selecting "How to use:" which is **How to use:** in source
+  // This handles cases like selecting "How to use:" which is **How to use:** in source,
+  // or text that spans inline code backticks like "some `code` text"
   {
     const { text, rawIndexMap } = stripMarkdownWithMap(sourceText);
     for (const variant of variants) {
-      const idx = text.indexOf(variant);
+      const idx = bestIndexOf(text, variant);
       if (idx < 0 || idx + variant.length - 1 >= rawIndexMap.length) { continue; }
       const rawStart = rawIndexMap[idx];
       const rawEnd = rawIndexMap[idx + variant.length - 1] + 1;
-      return { idx: rawStart, matchText: sourceText.slice(rawStart, rawEnd) };
+      // Expand to include full backtick spans if the match crosses a code boundary
+      const balanced = expandToBalancedBackticks(sourceText, rawStart, rawEnd);
+      return { idx: balanced.start, matchText: sourceText.slice(balanced.start, balanced.end) };
     }
   }
 
@@ -239,29 +350,30 @@ async function applyAnnotation(
       document.lineCount - 1
     );
 
-    // If we have column info (e.g., from table cells), use a tighter search window
+    // When column info is available (table cells), search only the exact line(s)
+    // to avoid cross-row interference. The hint is approximate (rendered chars ≠
+    // source chars due to markdown markers), so including neighboring rows causes
+    // the wrong occurrence to be nearest. Without column info, use ±2 buffer.
     const hasColumns = sourceRange.start.column > 1 || sourceRange.end.column > 1;
-    let rangeStart: vscode.Position;
-    let rangeEnd: vscode.Position;
-
-    if (hasColumns && startLine === endLine) {
-      // Column-scoped: search within the cell boundaries (with small buffer)
-      const colStart = Math.max(0, sourceRange.start.column - 1 - 2);
-      const lineLen = document.lineAt(startLine).text.length;
-      const colEnd = Math.min(lineLen, (sourceRange.end.column > 1 ? sourceRange.end.column - 1 : lineLen) + 2);
-      rangeStart = new vscode.Position(startLine, colStart);
-      rangeEnd = new vscode.Position(startLine, colEnd);
-    } else {
-      // Line-scoped: search the full line range with buffer
-      const bufferedStart = Math.max(0, startLine - 2);
-      const bufferedEnd = Math.min(document.lineCount - 1, endLine + 2);
-      rangeStart = new vscode.Position(bufferedStart, 0);
-      rangeEnd = document.lineAt(bufferedEnd).range.end;
-    }
+    const bufferedStart = hasColumns ? startLine : Math.max(0, startLine - 2);
+    const bufferedEnd = hasColumns ? endLine : Math.min(document.lineCount - 1, endLine + 2);
+    const rangeStart = new vscode.Position(bufferedStart, 0);
+    const rangeEnd = document.lineAt(bufferedEnd).range.end;
 
     const rangeText = document.getText(new vscode.Range(rangeStart, rangeEnd));
 
-    const result = findTextInSource(selectedText, rangeText);
+    // Compute column hint: offset within rangeText where the selected cell starts.
+    // This disambiguates when the same text appears in multiple table cells on one row.
+    let hintOffset: number | undefined;
+    if (hasColumns && startLine === endLine) {
+      const colStart = Math.max(0, sourceRange.start.column - 1);
+      // hintOffset is relative to rangeText start
+      const lineStartInRange = document.offsetAt(new vscode.Position(startLine, colStart))
+        - document.offsetAt(rangeStart);
+      hintOffset = Math.max(0, lineStartInRange);
+    }
+
+    const result = findTextInSource(selectedText, rangeText, hintOffset);
     if (result.idx >= 0) {
       idx = result.idx;
       matchText = result.matchText;
@@ -343,6 +455,27 @@ async function applyAnnotationAtLine(
   await applyWorkspaceEditAndSave(document, edit);
 }
 
+/**
+ * Wrap text with markers, handling multi-paragraph content.
+ * markdown-it inline plugins (==, ~~) can't span paragraph breaks,
+ * so each paragraph block gets wrapped separately.
+ */
+function wrapParagraphBlocks(text: string, marker: string): string {
+  // If no paragraph breaks, simple wrap
+  if (!text.includes('\n\n')) {
+    return marker + text + marker;
+  }
+  // Split on paragraph breaks (blank lines), wrap each non-empty block
+  const blocks = text.split(/(\n\n+)/);
+  return blocks.map((block) => {
+    // Preserve blank-line separators as-is
+    if (/^\n+$/.test(block)) { return block; }
+    // Don't wrap empty/whitespace-only blocks
+    if (block.trim().length === 0) { return block; }
+    return marker + block + marker;
+  }).join('');
+}
+
 async function applyEdit(
   document: vscode.TextDocument,
   annotation: AnnotationKind,
@@ -359,14 +492,18 @@ async function applyEdit(
     case 'highlight': {
       // Strip any existing highlight markers to prevent nesting
       const cleaned = actualText.replace(/==/g, '');
-      edit.replace(document.uri, matchRange, `==${cleaned}==`);
+      // markdown-it highlight is inline-scoped — can't span paragraphs.
+      // Wrap each paragraph block separately so each one renders.
+      const wrapped = wrapParagraphBlocks(cleaned, '==');
+      edit.replace(document.uri, matchRange, wrapped);
       break;
     }
 
     case 'delete': {
       // Strip any existing deletion markers to prevent nesting
       const cleaned = actualText.replace(/~~/g, '');
-      edit.replace(document.uri, matchRange, `~~${cleaned}~~`);
+      const wrapped = wrapParagraphBlocks(cleaned, '~~');
+      edit.replace(document.uri, matchRange, wrapped);
       break;
     }
 
@@ -448,9 +585,9 @@ export function clearAllAnnotations(text: string): string {
   let prev;
   do {
     prev = next;
-    // Use non-greedy matching within single lines to avoid eating across table rows
-    next = next.replace(/==([^=\n]*?)==/g, '$1');
-    next = next.replace(/~~([^~\n]*?)~~/g, '$1');
+    // Allow highlights/deletions to span multiple lines (multi-line selections)
+    next = next.replace(/==([\s\S]*?)==/g, '$1');
+    next = next.replace(/~~([\s\S]*?)~~/g, '$1');
     // Comments: strip %% markers and content, preserve surrounding structure
     next = next.replace(/ ?%%[^%]*?%% ?/g, '');
   } while (next !== prev);

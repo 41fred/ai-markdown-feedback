@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1
+
+Bug fixes for preview-to-source annotation mapping.
+
+- Fix table cell annotations picking wrong column when same text appears in multiple cells
+- Fix text spanning inline code backticks failing to highlight
+- Fix double-click word selection timing (increased debounce, added dblclick handler)
+- Fix multi-paragraph selections: each paragraph block now wrapped separately (inline plugins can't span paragraph breaks)
+- Fix multi-line selections: normalize newlines to spaces, collapse consecutive whitespace, fix readSourcePoint end-line logic bug
+- Fix already-annotated words blocking annotation of other occurrences of the same word
+- Fix Clear All not removing multi-line highlight/deletion markers
+- Fix mixed typographer transforms (source has em dashes + straight quotes, preview has em dashes + curly quotes)
+- Add sub-element column precision via DOM Range offset computation
+- Table cell search now uses exact line scope (no buffer) to prevent cross-row interference
+
 ## 0.1.0
 
 Initial release.

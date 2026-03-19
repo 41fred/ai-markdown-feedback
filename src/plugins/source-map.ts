@@ -44,9 +44,10 @@ export function sourceMapPlugin(md: MarkdownIt): void {
  */
 function annotateTableCells(tokens: Token[], trIdx: number, rawRow: string, line: number): void {
   // Find pipe positions in the raw row to determine cell boundaries
+  // Skip escaped pipes (\|) which are literal content, not separators
   const pipePositions: number[] = [];
   for (let i = 0; i < rawRow.length; i++) {
-    if (rawRow[i] === '|') { pipePositions.push(i); }
+    if (rawRow[i] === '|' && (i === 0 || rawRow[i - 1] !== '\\')) { pipePositions.push(i); }
   }
 
   let cellIdx = 0;
@@ -57,12 +58,19 @@ function annotateTableCells(tokens: Token[], trIdx: number, rawRow: string, line
     if (t.type === 'th_open' || t.type === 'td_open') {
       t.attrSet('data-source-line', String(line));
 
-      // Map cell to the content between pipes
+      // Map cell to the trimmed content between pipes (skip whitespace padding)
       if (cellIdx < pipePositions.length - 1) {
-        const start = pipePositions[cellIdx] + 1; // after the pipe
-        const end = pipePositions[cellIdx + 1];   // before the next pipe
-        // +1 for 1-based columns
-        t.attrSet('data-source-pos', `${start + 1}:${end + 1}`);
+        let start = pipePositions[cellIdx] + 1; // after the pipe
+        let end = pipePositions[cellIdx + 1] - 1; // before the next pipe
+
+        // Trim leading/trailing whitespace so span covers cell content only
+        while (start <= end && /\s/.test(rawRow[start] ?? '')) { start++; }
+        while (end >= start && /\s/.test(rawRow[end] ?? '')) { end--; }
+
+        // 1-based columns, half-open end: [startColumn, endColumn)
+        const startColumn = start + 1;
+        const endColumn = end + 2;
+        t.attrSet('data-source-pos', `${startColumn}:${endColumn}`);
       }
 
       cellIdx++;
@@ -117,9 +125,10 @@ function annotateInlineChildren(children: Token[], line: number): void {
       }
 
       case 'code_inline': {
-        const rawLen = child.content.length + 2; // `code`
+        const tickLen = (child.markup && child.markup.length) || 1;
+        const rawLen = child.content.length + tickLen * 2;
         child.attrSet('data-source-line', String(line));
-        child.attrSet('data-source-pos', `${column + 1}:${column + 1 + child.content.length}`);
+        child.attrSet('data-source-pos', `${column + tickLen}:${column + tickLen + child.content.length}`);
         column += rawLen;
         break;
       }
