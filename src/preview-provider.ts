@@ -86,10 +86,46 @@ function buildSearchVariants(selectedText: string): string[] {
   )];
 }
 
-const VISIBLE_MARKERS = ['==', '~~'];
+// Annotation markers (our syntax)
+const ANNOTATION_MARKERS = ['==', '~~'];
+// All inline markdown markers to strip when matching preview text to source
+const ALL_INLINE_MARKERS = ['==', '~~', '**', '__', '%%'];
 
 /**
- * Strip annotation markers from source text while tracking position mapping.
+ * Strip markdown inline markers from source text while tracking position mapping.
+ * Handles: ==, ~~, **, __, %%, and single *, _, `
+ */
+function stripMarkdownWithMap(sourceText: string): { text: string; rawIndexMap: number[] } {
+  const rawIndexMap: number[] = [];
+  let text = '';
+
+  for (let i = 0; i < sourceText.length;) {
+    const two = sourceText.slice(i, i + 2);
+
+    // Skip 2-char markers: ==, ~~, **, __, %%
+    if (two === '==' || two === '~~' || two === '**' || two === '__' || two === '%%') {
+      i += 2;
+      continue;
+    }
+
+    const ch = sourceText[i];
+
+    // Skip single-char emphasis markers: *, _, `
+    if (ch === '*' || ch === '_' || ch === '`') {
+      i += 1;
+      continue;
+    }
+
+    rawIndexMap.push(i);
+    text += ch;
+    i += 1;
+  }
+
+  return { text, rawIndexMap };
+}
+
+/**
+ * Strip a specific marker from source text while tracking position mapping.
  */
 function stripMarkersWithMap(sourceText: string, marker: string): { text: string; rawIndexMap: number[] } {
   let text = '';
@@ -128,8 +164,8 @@ function expandToAdjacentMarkers(sourceText: string, start: number, end: number,
 function findTextInSource(selectedText: string, sourceText: string): { idx: number; matchText: string } {
   const variants = buildSearchVariants(selectedText);
 
-  // 1. Try finding text with markers already wrapped around it
-  for (const marker of VISIBLE_MARKERS) {
+  // 1. Try finding text with annotation markers already wrapped around it
+  for (const marker of ANNOTATION_MARKERS) {
     for (const variant of variants) {
       const wrapped = marker + variant + marker;
       const idx = sourceText.indexOf(wrapped);
@@ -137,8 +173,8 @@ function findTextInSource(selectedText: string, sourceText: string): { idx: numb
     }
   }
 
-  // 2. Try matching against marker-stripped source (handles partial markers within selection)
-  for (const marker of VISIBLE_MARKERS) {
+  // 2. Try matching against annotation-marker-stripped source (handles partial markers)
+  for (const marker of ANNOTATION_MARKERS) {
     const { text, rawIndexMap } = stripMarkersWithMap(sourceText, marker);
     for (const variant of variants) {
       const idx = text.indexOf(variant);
@@ -153,6 +189,19 @@ function findTextInSource(selectedText: string, sourceText: string): { idx: numb
   for (const variant of variants) {
     const idx = sourceText.indexOf(variant);
     if (idx >= 0) { return { idx, matchText: variant }; }
+  }
+
+  // 4. Markdown-aware match: strip ALL inline markers (**, __, *, _, `, ==, ~~, %%)
+  // This handles cases like selecting "How to use:" which is **How to use:** in source
+  {
+    const { text, rawIndexMap } = stripMarkdownWithMap(sourceText);
+    for (const variant of variants) {
+      const idx = text.indexOf(variant);
+      if (idx < 0 || idx + variant.length - 1 >= rawIndexMap.length) { continue; }
+      const rawStart = rawIndexMap[idx];
+      const rawEnd = rawIndexMap[idx + variant.length - 1] + 1;
+      return { idx: rawStart, matchText: sourceText.slice(rawStart, rawEnd) };
+    }
   }
 
   return { idx: -1, matchText: selectedText };
@@ -189,10 +238,27 @@ async function applyAnnotation(
       (sourceRange.end.line > 0 ? sourceRange.end.line - 1 : sourceRange.start.line - 1) + headerOffset,
       document.lineCount - 1
     );
-    const bufferedStart = Math.max(0, startLine - 2);
-    const bufferedEnd = Math.min(document.lineCount - 1, endLine + 2);
-    const rangeStart = new vscode.Position(bufferedStart, 0);
-    const rangeEnd = document.lineAt(bufferedEnd).range.end;
+
+    // If we have column info (e.g., from table cells), use a tighter search window
+    const hasColumns = sourceRange.start.column > 1 || sourceRange.end.column > 1;
+    let rangeStart: vscode.Position;
+    let rangeEnd: vscode.Position;
+
+    if (hasColumns && startLine === endLine) {
+      // Column-scoped: search within the cell boundaries (with small buffer)
+      const colStart = Math.max(0, sourceRange.start.column - 1 - 2);
+      const lineLen = document.lineAt(startLine).text.length;
+      const colEnd = Math.min(lineLen, (sourceRange.end.column > 1 ? sourceRange.end.column - 1 : lineLen) + 2);
+      rangeStart = new vscode.Position(startLine, colStart);
+      rangeEnd = new vscode.Position(startLine, colEnd);
+    } else {
+      // Line-scoped: search the full line range with buffer
+      const bufferedStart = Math.max(0, startLine - 2);
+      const bufferedEnd = Math.min(document.lineCount - 1, endLine + 2);
+      rangeStart = new vscode.Position(bufferedStart, 0);
+      rangeEnd = document.lineAt(bufferedEnd).range.end;
+    }
+
     const rangeText = document.getText(new vscode.Range(rangeStart, rangeEnd));
 
     const result = findTextInSource(selectedText, rangeText);

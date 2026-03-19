@@ -371,17 +371,29 @@ export function getWebviewContent(options: WebviewOptions): string {
           endEl = startEl;
         }
 
-        var startLine = startEl ? Number(startEl.getAttribute('data-source-line')) || 1 : 1;
-        var endLine = endEl ? Number(endEl.getAttribute('data-source-end-line') || endEl.getAttribute('data-source-line')) || startLine : startLine;
-
         previewRange = {
-          start: { line: startLine, column: 1 },
-          end: { line: endLine, column: 1 }
+          start: readSourcePoint(startEl, false),
+          end: readSourcePoint(endEl, true)
         };
         // Trim trailing/leading whitespace — browser selections
         // often grab extra whitespace at block boundaries, table cells, etc.
         previewText = sel.toString().trim();
         updateToolbarState(previewText.length > 0);
+      }
+
+      function readSourcePoint(el, isEnd) {
+        if (!el) return { line: 1, column: 1 };
+        var line = Number(el.getAttribute('data-source-line')) || 1;
+        if (!isEnd) {
+          var endLine = Number(el.getAttribute('data-source-end-line'));
+          if (endLine) line = isEnd ? endLine : line;
+        }
+        var pos = el.getAttribute('data-source-pos');
+        if (pos) {
+          var parts = pos.split(':').map(Number);
+          return { line: line, column: isEnd ? (parts[1] || 1) : (parts[0] || 1) };
+        }
+        return { line: line, column: 1 };
       }
 
       function closestMappedElement(node) {

@@ -9,7 +9,11 @@ import Token from 'markdown-it/lib/token.mjs';
 
 export function sourceMapPlugin(md: MarkdownIt): void {
   md.core.ruler.after('inline', 'acemd_source_map', (state) => {
-    for (const token of state.tokens) {
+    const lines = state.src.split(/\r?\n/);
+
+    for (let i = 0; i < state.tokens.length; i++) {
+      const token = state.tokens[i];
+
       // Block-level tokens with .map
       if ((token.nesting === 1 || token.nesting === 0) && token.map) {
         const startLine = token.map[0] + 1; // 1-based
@@ -18,12 +22,52 @@ export function sourceMapPlugin(md: MarkdownIt): void {
         token.attrSet('data-source-end-line', String(endLine));
       }
 
+      // Annotate table cells (th_open/td_open don't get .map from markdown-it)
+      if (token.type === 'tr_open' && token.map) {
+        const rowLine = token.map[0]; // 0-based
+        const rawRow = lines[rowLine] || '';
+        annotateTableCells(state.tokens, i, rawRow, rowLine + 1);
+      }
+
       // Inline children — track column positions within the line
       if (token.type === 'inline' && token.children && token.map) {
         annotateInlineChildren(token.children, token.map[0] + 1);
       }
     }
   });
+}
+
+/**
+ * Walk from tr_open to tr_close, find th_open/td_open tokens,
+ * and annotate them with data-source-line and data-source-pos
+ * based on pipe positions in the raw row text.
+ */
+function annotateTableCells(tokens: Token[], trIdx: number, rawRow: string, line: number): void {
+  // Find pipe positions in the raw row to determine cell boundaries
+  const pipePositions: number[] = [];
+  for (let i = 0; i < rawRow.length; i++) {
+    if (rawRow[i] === '|') { pipePositions.push(i); }
+  }
+
+  let cellIdx = 0;
+  for (let j = trIdx + 1; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t.type === 'tr_close') { break; }
+
+    if (t.type === 'th_open' || t.type === 'td_open') {
+      t.attrSet('data-source-line', String(line));
+
+      // Map cell to the content between pipes
+      if (cellIdx < pipePositions.length - 1) {
+        const start = pipePositions[cellIdx] + 1; // after the pipe
+        const end = pipePositions[cellIdx + 1];   // before the next pipe
+        // +1 for 1-based columns
+        t.attrSet('data-source-pos', `${start + 1}:${end + 1}`);
+      }
+
+      cellIdx++;
+    }
+  }
 }
 
 function annotateInlineChildren(children: Token[], line: number): void {
