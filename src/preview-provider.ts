@@ -93,16 +93,58 @@ async function applyAnnotation(
   sourceRange: SourceRange,
   selectedText: string,
 ): Promise<void> {
-  // Always search the full document — simpler and more reliable
   const fullText = document.getText();
-  const { idx, matchText } = findTextInSource(selectedText, fullText);
+
+  // Calculate header offset: the preview is rendered from header-stripped text,
+  // so data-source-line numbers are relative to the headerless content.
+  // We need to add back the header's line count when mapping to the real document.
+  const headerOffset = getHeaderLineCount(fullText);
+
+  // First try: search near the source line range (from data-source-line attributes)
+  // This avoids matching the wrong occurrence when the same text appears multiple times
+  let idx = -1;
+  let matchText = selectedText;
+  let searchOffset = 0;
+
+  if (sourceRange.start.line > 0) {
+    // Add header offset to convert preview line numbers to real document line numbers
+    const startLine = Math.max(0, sourceRange.start.line - 1 + headerOffset); // 0-based
+    const endLine = Math.min(
+      (sourceRange.end.line > 0 ? sourceRange.end.line - 1 : sourceRange.start.line - 1) + headerOffset,
+      document.lineCount - 1
+    );
+    const bufferedStart = Math.max(0, startLine - 2);
+    const bufferedEnd = Math.min(document.lineCount - 1, endLine + 2);
+    const rangeStart = new vscode.Position(bufferedStart, 0);
+    const rangeEnd = document.lineAt(bufferedEnd).range.end;
+    const rangeText = document.getText(new vscode.Range(rangeStart, rangeEnd));
+
+    const result = findTextInSource(selectedText, rangeText);
+    if (result.idx >= 0) {
+      idx = result.idx;
+      matchText = result.matchText;
+      searchOffset = document.offsetAt(rangeStart);
+    }
+  }
+
+  // Fallback: search the full document
+  if (idx < 0) {
+    const result = findTextInSource(selectedText, fullText);
+    idx = result.idx;
+    matchText = result.matchText;
+    searchOffset = 0;
+  }
+
   if (idx < 0) {
     vscode.window.showWarningMessage(
-      `AI Markdown: Could not find selected text in source. Selection: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`
+      `Ace: Could not find selected text in source. Selection: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`
     );
     return;
   }
-  const beforeMatch = fullText.substring(0, idx);
+
+  // Convert offset to line/col using the full document
+  const absoluteIdx = searchOffset + idx;
+  const beforeMatch = fullText.substring(0, absoluteIdx);
   const matchLines = beforeMatch.split('\n');
   const matchStartLine = matchLines.length - 1;
   const matchStartCol = matchLines[matchLines.length - 1].length;
@@ -119,6 +161,44 @@ async function applyAnnotation(
   );
 
   await applyEdit(document, annotation, matchRange, matchText);
+}
+
+/**
+ * Insert a comment or edit suggestion at the end of a source line (no selection needed).
+ */
+async function applyAnnotationAtLine(
+  document: vscode.TextDocument,
+  annotation: 'comment' | 'edit',
+  sourceRange: SourceRange,
+): Promise<void> {
+  const fullText = document.getText();
+  const headerOffset = getHeaderLineCount(fullText);
+  const targetLine = Math.min(
+    Math.max(0, sourceRange.start.line - 1 + headerOffset),
+    document.lineCount - 1
+  );
+  const lineEnd = document.lineAt(targetLine).range.end;
+
+  const edit = new vscode.WorkspaceEdit();
+
+  if (annotation === 'comment') {
+    const comment = await vscode.window.showInputBox({
+      prompt: 'Enter your comment (visible to LLMs, hidden in preview)',
+      placeHolder: 'Your feedback here...',
+    });
+    if (!comment) { return; }
+    edit.insert(document.uri, lineEnd, ` %%${comment}%%`);
+  } else {
+    const suggestion = await vscode.window.showInputBox({
+      prompt: 'Enter your edit suggestion',
+      placeHolder: 'Change X to Y',
+    });
+    if (!suggestion) { return; }
+    edit.insert(document.uri, lineEnd, `\n\n> [!EDIT] ${suggestion}\n`);
+  }
+
+  await ensureAnnotationHeader(document, edit);
+  await vscode.workspace.applyEdit(edit);
 }
 
 async function applyEdit(
@@ -169,6 +249,16 @@ async function applyEdit(
   await vscode.workspace.applyEdit(edit);
 }
 
+/**
+ * Count how many lines the annotation header occupies in the document.
+ * Returns 0 if no header is present.
+ */
+function getHeaderLineCount(text: string): number {
+  const match = text.match(/<!-- AI Markdown Feedback:[\s\S]*?-->\n?\n?/);
+  if (!match) { return 0; }
+  return match[0].split('\n').length - 1 + (match[0].endsWith('\n\n') ? 1 : 0);
+}
+
 const ANNOTATION_HEADER = `<!-- AI Markdown Feedback: This file contains reviewer annotations.
 ==highlights== mark text for discussion. %%comments%% are inline feedback (hidden in preview).
 ~~deletions~~ suggest text removal. > [!EDIT] blocks are change requests.
@@ -214,7 +304,7 @@ function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vs
   const config = vscode.workspace.getConfiguration('aimd');
   const highlightColor = config.get<string>('highlightColor', '#fff3a0');
   const showGutter = config.get<boolean>('showAnnotationGutter', true);
-  const nonce = crypto.randomBytes(32).toString('hex');
+  const nonce = crypto.randomBytes(16).toString('hex');
 
   return getWebviewContent({
     body: rendered,
@@ -228,7 +318,7 @@ function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vs
 // --- CustomTextEditorProvider (preview-only mode) ---
 
 export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorProvider {
-  public static readonly viewType = 'aimd.previewEditor';
+  public static readonly viewType = 'acemd.previewEditor';
   private md: MarkdownIt;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -265,8 +355,13 @@ export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorPro
     const msgSub = webviewPanel.webview.onDidReceiveMessage(async (message) => {
       switch (message.type) {
         case 'preview.applyAnnotation':
-          if (message.range && message.text) {
-            await applyAnnotation(document, message.annotation, message.range, message.text);
+          if (message.range) {
+            if (message.text) {
+              await applyAnnotation(document, message.annotation, message.range, message.text);
+            } else if (message.annotation === 'comment' || message.annotation === 'edit') {
+              // Comment/Edit can work without selection — insert at end of the source line
+              await applyAnnotationAtLine(document, message.annotation, message.range);
+            }
           }
           return;
         case 'preview.undo':
@@ -299,15 +394,15 @@ export class SidePanelPreviewProvider {
   public async openPreview(document: vscode.TextDocument): Promise<void> {
     this.document = document;
 
+    // Always dispose old panel and create fresh — ensures enableScripts takes effect
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Beside);
-      this.updatePreview();
-      return;
+      this.panel.dispose();
+      this.panel = undefined;
     }
 
     this.panel = vscode.window.createWebviewPanel(
-      'aimd.sidePreview',
-      `AI Markdown: ${this.getShortName(document.uri)}`,
+      'acemd.sidePreview',
+      `Ace: ${this.getShortName(document.uri)}`,
       {
         viewColumn: vscode.ViewColumn.Beside,
         preserveFocus: true,
@@ -343,7 +438,7 @@ export class SidePanelPreviewProvider {
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         if (editor && editor.document.languageId === 'markdown' && this.panel) {
           this.document = editor.document;
-          this.panel.title = `AI Markdown: ${this.getShortName(editor.document.uri)}`;
+          this.panel.title = `Ace: ${this.getShortName(editor.document.uri)}`;
           this.updatePreview();
         }
       })

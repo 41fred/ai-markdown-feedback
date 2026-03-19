@@ -24,26 +24,26 @@ export function activate(context: vscode.ExtensionContext) {
   sidePanelProvider = new SidePanelPreviewProvider(context.extensionUri);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aimd.openPreview', () => {
+    vscode.commands.registerCommand('acemd.openPreview', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor && editor.document.languageId === 'markdown') {
         sidePanelProvider.openPreview(editor.document);
       } else {
-        vscode.window.showWarningMessage('AI Markdown: Open a Markdown file first.');
+        vscode.window.showWarningMessage('Ace: Open a Markdown file first.');
       }
     })
   );
 
   // Annotation insertion commands (for use from the text editor)
   context.subscriptions.push(
-    vscode.commands.registerCommand('aimd.insertHighlight', () => {
+    vscode.commands.registerCommand('acemd.insertHighlight', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) { wrapSelection(editor, '==', '=='); }
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aimd.insertComment', async () => {
+    vscode.commands.registerCommand('acemd.insertComment', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { return; }
 
@@ -62,7 +62,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aimd.insertEdit', async () => {
+    vscode.commands.registerCommand('acemd.insertEdit', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { return; }
 
@@ -81,7 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aimd.insertDelete', () => {
+    vscode.commands.registerCommand('acemd.insertDelete', () => {
       const editor = vscode.window.activeTextEditor;
       if (editor) { wrapSelection(editor, '~~', '~~'); }
     })
@@ -91,7 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
 function wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string): void {
   const selection = editor.selection;
   if (selection.isEmpty) {
-    vscode.window.showInformationMessage('AI Markdown: Select text first, then apply annotation.');
+    vscode.window.showInformationMessage('Ace: Select text first, then apply annotation.');
     return;
   }
 

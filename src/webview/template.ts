@@ -321,9 +321,6 @@ export function getWebviewContent(options: WebviewOptions): string {
 
   <script nonce="${nonce}">
     (function() {
-      // Visible proof the script is running
-      document.body.style.borderTop = '3px solid lime';
-
       const vscode = acquireVsCodeApi();
       let previewRange = null;
       let previewText = '';
@@ -360,9 +357,9 @@ export function getWebviewContent(options: WebviewOptions): string {
           start: { line: startLine, column: 1 },
           end: { line: endLine, column: 1 }
         };
-        // Trim trailing/leading whitespace and newlines — browser selections
+        // Trim trailing/leading whitespace — browser selections
         // often grab extra whitespace at block boundaries, table cells, etc.
-        previewText = sel.toString().replace(/^[\s\n]+|[\s\n]+$/g, '');
+        previewText = sel.toString().trim();
         updateToolbarState(previewText.length > 0);
       }
 
@@ -399,36 +396,31 @@ export function getWebviewContent(options: WebviewOptions): string {
 
       function sendAnnotation(command) {
         var annotation = commandToAnnotation(command);
-        if (!annotation) {
-          showDebug('No annotation for command: ' + command);
-          return;
-        }
+        if (!annotation) return;
 
         var needsSelection = command === 'insertHighlight' || command === 'insertDelete';
-        if (needsSelection && !previewRange) {
-          showDebug('No selection for: ' + command);
-          return;
-        }
+        if (needsSelection && !previewRange) return;
 
-        showDebug('Sending: ' + annotation + ' | text: "' + (previewText || '').substring(0, 40) + '" | range: ' + JSON.stringify(previewRange));
+        // For comment/edit without selection, find the cursor's nearest block line
+        var range = previewRange;
+        if (!range && (command === 'insertComment' || command === 'insertEdit')) {
+          var sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            var cursorNode = sel.getRangeAt(0).startContainer;
+            var el = closestMappedElement(cursorNode);
+            if (el) {
+              var line = Number(el.getAttribute('data-source-line')) || 1;
+              range = { start: { line: line, column: 1 }, end: { line: line, column: 1 } };
+            }
+          }
+        }
 
         vscode.postMessage({
           type: 'preview.applyAnnotation',
           annotation: annotation,
-          range: previewRange,
+          range: range,
           text: previewText,
         });
-      }
-
-      function showDebug(msg) {
-        var el = document.getElementById('ace-debug');
-        if (!el) {
-          el = document.createElement('div');
-          el.id = 'ace-debug';
-          el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1a1a2e;color:#0f0;font-family:monospace;font-size:11px;padding:6px 10px;z-index:9999;border-top:1px solid #333;max-height:80px;overflow-y:auto;';
-          document.body.appendChild(el);
-        }
-        el.textContent = msg;
       }
 
       // --- Toolbar button clicks ---

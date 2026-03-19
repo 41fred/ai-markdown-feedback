@@ -1,8 +1,8 @@
 {
   "name": "ai-markdown-feedback",
-  "displayName": "AI Markdown Feedback for LLMs",
+  "displayName": "Ace: AI Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",
@@ -39,7 +39,7 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "aimd.previewEditor",
+        "viewType": "acemd.previewEditor",
         "displayName": "AI Markdown Preview",
         "selector": [
           { "filenamePattern": "*.md" }
@@ -49,88 +49,88 @@
     ],
     "commands": [
       {
-        "command": "aimd.openPreview",
-        "title": "AI Markdown: Open Feedback Preview",
+        "command": "acemd.openPreview",
+        "title": "Ace: Open Feedback Preview",
         "icon": {
           "light": "media/preview-light.svg",
           "dark": "media/preview-dark.svg"
         }
       },
       {
-        "command": "aimd.insertHighlight",
-        "title": "AI Markdown: Highlight Selection"
+        "command": "acemd.insertHighlight",
+        "title": "Ace: Highlight Selection"
       },
       {
-        "command": "aimd.insertComment",
-        "title": "AI Markdown: Add Comment"
+        "command": "acemd.insertComment",
+        "title": "Ace: Add Comment"
       },
       {
-        "command": "aimd.insertEdit",
-        "title": "AI Markdown: Suggest Edit"
+        "command": "acemd.insertEdit",
+        "title": "Ace: Suggest Edit"
       },
       {
-        "command": "aimd.insertDelete",
-        "title": "AI Markdown: Suggest Deletion"
+        "command": "acemd.insertDelete",
+        "title": "Ace: Suggest Deletion"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "when": "resourceLangId == markdown",
-          "command": "aimd.openPreview",
+          "command": "acemd.openPreview",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "aimd.insertHighlight",
+          "command": "acemd.insertHighlight",
           "group": "aimd@1"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "aimd.insertComment",
+          "command": "acemd.insertComment",
           "group": "aimd@2"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "aimd.insertEdit",
+          "command": "acemd.insertEdit",
           "group": "aimd@3"
         },
         {
           "when": "resourceLangId == markdown && editorHasSelection",
-          "command": "aimd.insertDelete",
+          "command": "acemd.insertDelete",
           "group": "aimd@4"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "aimd.openPreview",
+        "command": "acemd.openPreview",
         "key": "ctrl+k ctrl+v",
         "mac": "cmd+k cmd+v",
         "when": "resourceLangId == markdown"
       },
       {
-        "command": "aimd.insertHighlight",
+        "command": "acemd.insertHighlight",
         "key": "ctrl+k h",
         "mac": "cmd+k h",
         "when": "editorTextFocus && resourceLangId == markdown && editorHasSelection"
       },
       {
-        "command": "aimd.insertComment",
+        "command": "acemd.insertComment",
         "key": "ctrl+k c",
         "mac": "cmd+k c",
         "when": "editorTextFocus && resourceLangId == markdown"
       },
       {
-        "command": "aimd.insertEdit",
+        "command": "acemd.insertEdit",
         "key": "ctrl+k e",
         "mac": "cmd+k e",
         "when": "editorTextFocus && resourceLangId == markdown"
       },
       {
-        "command": "aimd.insertDelete",
+        "command": "acemd.insertDelete",
         "key": "ctrl+k d",
         "mac": "cmd+k d",
         "when": "editorTextFocus && resourceLangId == markdown && editorHasSelection"
@@ -139,12 +139,12 @@
     "configuration": {
       "title": "AI Markdown Feedback",
       "properties": {
-        "aimd.highlightColor": {
+        "acemd.highlightColor": {
           "type": "string",
           "default": "#fff3a0",
           "description": "Background color for highlighted text"
         },
-        "aimd.showAnnotationGutter": {
+        "acemd.showAnnotationGutter": {
           "type": "boolean",
           "default": true,
           "description": "Show annotation markers in the gutter"

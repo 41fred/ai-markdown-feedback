@@ -8,7 +8,7 @@ import MarkdownIt from 'markdown-it';
 import Token from 'markdown-it/lib/token.mjs';
 
 export function sourceMapPlugin(md: MarkdownIt): void {
-  md.core.ruler.after('inline', 'aimd_source_map', (state) => {
+  md.core.ruler.after('inline', 'acemd_source_map', (state) => {
     for (const token of state.tokens) {
       // Block-level tokens with .map
       if ((token.nesting === 1 || token.nesting === 0) && token.map) {

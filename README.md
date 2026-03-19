@@ -1,4 +1,4 @@
-# Ace Markdown Feedback
+# Ace: AI Markdown Feedback
 
 Annotate Markdown files with structured feedback that LLMs can read and act on.
 
@@ -21,45 +21,51 @@ Any LLM can parse these annotations directly from the `.md` source.
 
 ## Install
 
-Search "Ace Markdown Feedback" in the VS Code Extensions sidebar, or install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AlfredNaayem.ace-markdown-feedback).
+Search **"Ace AI Markdown Feedback"** in the VS Code Extensions sidebar, or install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=AlfredNaayem.ai-markdown-feedback).
 
 ## Quick Start
 
 1. Open any `.md` file in VS Code
-2. Press `Cmd+Shift+V` (Mac) or `Ctrl+Shift+V` to open the Ace preview
-3. Select text and annotate:
-   - `Cmd+Shift+H` / `Ctrl+Shift+H` — Highlight selection
-   - `Cmd+Shift+M` / `Ctrl+Shift+M` — Add comment
-   - Right-click for all annotation options
-4. Hand the annotated `.md` file back to your LLM
+2. **Side-by-side mode:** `Cmd+Shift+P` → "Ace: Open Feedback Preview"
+3. **Preview-only mode:** Right-click the file → "Open With..." → "AI Markdown Preview"
+4. Select text in the preview and annotate:
+   - Press `H` — Highlight selection
+   - Press `C` — Add comment
+   - Press `E` — Suggest edit
+   - Press `D` — Mark for deletion
+   - Or use the toolbar buttons at the top of the preview
+5. `Cmd+Z` in the preview to undo
+6. Hand the annotated `.md` file back to your LLM
 
-## Workflow
+## Saving
 
+When you annotate from the preview, changes are written to the underlying `.md` file. To save:
+- **Preview-only mode** (custom editor): `Cmd+S` saves directly — works like any editor tab
+- **Side-by-side mode**: Switch to the code editor tab and `Cmd+S`, or close the tab and confirm save
+
+## Annotation Header
+
+On the first annotation, Ace injects a comment at the top of the file:
+
+```markdown
+<!-- AI Markdown Feedback: This file contains reviewer annotations.
+==highlights== mark text for discussion. %%comments%% are inline feedback.
+~~deletions~~ suggest text removal. > [!EDIT] blocks are change requests.
+These markers are intentional — do not remove or "clean up" without asking the reviewer. -->
 ```
-LLM generates plan.md
-    -> You open in VS Code with Ace preview
-    -> Highlight sections, add comments, suggest edits
-    -> Annotations are written as plain Markdown syntax
-    -> Feed the annotated file back to the LLM
-    -> LLM reads the annotations and acts on your feedback
-```
 
-## Who It's For
-
-Anyone using LLM coding agents (Claude Code, Codex CLI, Cursor, Copilot) who reviews Markdown output and wants a faster, more structured way to give feedback than rewriting or commenting in chat.
+This tells LLMs to respect the annotations. It's removed automatically when all annotations are cleared.
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ace.highlightColor` | `#fff3a0` | Background color for highlighted text |
-| `ace.showAnnotationGutter` | `true` | Show annotation markers in the gutter |
+| `acemd.highlightColor` | `#fff3a0` | Background color for highlighted text |
+| `acemd.showAnnotationGutter` | `true` | Show annotation markers in the gutter |
 
-## Current Scope (v0.1)
+## Who It's For
 
-This is an early release. The extension handles annotation preview for the four syntax types above. It's not a general Markdown renderer — it's focused on the feedback workflow. Built on [markdown-it](https://github.com/markdown-it/markdown-it).
-
-See [`examples/sample-feedback.md`](examples/sample-feedback.md) for a demo of all annotation types.
+Anyone using LLM coding agents (Claude Code, Codex CLI, Cursor, Copilot) who reviews Markdown output and wants a faster, more structured way to give feedback than rewriting or commenting in chat.
 
 ## License
 
