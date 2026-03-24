@@ -1,7 +1,29 @@
 import * as vscode from 'vscode';
-import { MarkdownPreviewEditorProvider, SidePanelPreviewProvider, clearAllAnnotationsInDocument } from './preview-provider';
+import { MarkdownPreviewEditorProvider, SidePanelPreviewProvider, clearAllAnnotationsInDocument, ensureAnnotationHeader } from './preview-provider';
 
 let sidePanelProvider: SidePanelPreviewProvider;
+
+const AI_INSTRUCTIONS = `# Ace Annotation Rules
+
+When a file contains Ace reviewer annotations, treat them as intentional feedback — not formatting errors.
+
+## Annotation syntax
+
+| Marker | Meaning |
+|--------|---------|
+| \`==highlighted text==\` | Flagged for discussion or review |
+| \`%%comment%%\` | Inline reviewer feedback (hidden in preview, visible in source) |
+| \`~~deleted text~~\` | Suggested removal |
+| \`> [!EDIT] ...\` | Specific change request |
+
+## Rules
+
+- Do NOT remove, normalize, or "clean up" these markers unless explicitly asked
+- Use annotations as guidance for what to change when revising the document
+- The file may begin with an instruction header in either format:
+  - HTML comment: \`<!-- AI Markdown Feedback: ... -->\`
+  - Markdown callout: \`> [!NOTE] **Annotations present.** ...\`
+- That header is part of the review system — do not remove it`;
 
 export function activate(context: vscode.ExtensionContext) {
   // Register the custom editor (preview-only mode for .md files)
@@ -36,9 +58,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Annotation insertion commands (for use from the text editor)
   context.subscriptions.push(
-    vscode.commands.registerCommand('acemd.insertHighlight', () => {
+    vscode.commands.registerCommand('acemd.insertHighlight', async () => {
       const editor = vscode.window.activeTextEditor;
-      if (editor) { wrapSelection(editor, '==', '=='); }
+      if (editor) { await wrapSelection(editor, '==', '=='); }
     })
   );
 
@@ -48,16 +70,16 @@ export function activate(context: vscode.ExtensionContext) {
       if (!editor) { return; }
 
       const comment = await vscode.window.showInputBox({
-        prompt: 'Enter your comment (visible to Claude, hidden in preview)',
+        prompt: 'Enter your comment (visible to AI tools, hidden in preview)',
         placeHolder: 'Your feedback here...',
       });
 
-      if (comment) {
-        const position = editor.selection.active;
-        editor.edit((editBuilder) => {
-          editBuilder.insert(position, ` %%${comment}%% `);
-        });
-      }
+      if (!comment) { return; }
+
+      const position = editor.selection.active;
+      await applyEditorAnnotation(editor, (edit) => {
+        edit.insert(editor.document.uri, position, ` %%${comment}%% `);
+      });
     })
   );
 
@@ -71,19 +93,19 @@ export function activate(context: vscode.ExtensionContext) {
         placeHolder: 'Change X to Y',
       });
 
-      if (suggestion) {
-        const position = editor.selection.active;
-        editor.edit((editBuilder) => {
-          editBuilder.insert(position, `\n\n> [!EDIT] ${suggestion}\n\n`);
-        });
-      }
+      if (!suggestion) { return; }
+
+      const position = editor.selection.active;
+      await applyEditorAnnotation(editor, (edit) => {
+        edit.insert(editor.document.uri, position, `\n\n> [!EDIT] ${suggestion}\n\n`);
+      });
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('acemd.insertDelete', () => {
+    vscode.commands.registerCommand('acemd.insertDelete', async () => {
       const editor = vscode.window.activeTextEditor;
-      if (editor) { wrapSelection(editor, '~~', '~~'); }
+      if (editor) { await wrapSelection(editor, '~~', '~~'); }
     })
   );
 
@@ -96,6 +118,14 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       await clearAllAnnotationsInDocument(editor.document);
+    })
+  );
+
+  // Copy AI instructions to clipboard
+  context.subscriptions.push(
+    vscode.commands.registerCommand('acemd.copyAIInstructions', async () => {
+      await vscode.env.clipboard.writeText(AI_INSTRUCTIONS);
+      vscode.window.showInformationMessage('Ace: AI instructions copied to clipboard. Paste into your CLAUDE.md, .cursorrules, or AI config file.');
     })
   );
 
@@ -128,16 +158,29 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-function wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string): void {
+/**
+ * Apply an annotation edit via WorkspaceEdit, ensuring the header is present.
+ */
+async function applyEditorAnnotation(
+  editor: vscode.TextEditor,
+  buildEdit: (edit: vscode.WorkspaceEdit) => void,
+): Promise<void> {
+  const edit = new vscode.WorkspaceEdit();
+  buildEdit(edit);
+  ensureAnnotationHeader(editor.document, edit);
+  await vscode.workspace.applyEdit(edit);
+}
+
+async function wrapSelection(editor: vscode.TextEditor, prefix: string, suffix: string): Promise<void> {
   const selection = editor.selection;
   if (selection.isEmpty) {
     vscode.window.showInformationMessage('Ace: Select text first, then apply annotation.');
     return;
   }
 
-  editor.edit((editBuilder) => {
-    const selectedText = editor.document.getText(selection);
-    editBuilder.replace(selection, `${prefix}${selectedText}${suffix}`);
+  const selectedText = editor.document.getText(selection);
+  await applyEditorAnnotation(editor, (edit) => {
+    edit.replace(editor.document.uri, selection, `${prefix}${selectedText}${suffix}`);
   });
 }
 

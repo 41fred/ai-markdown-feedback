@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+
+Fix edit annotation swallowing subsequent content.
+
+- Fix `> [!EDIT]` blockquote not terminating when applied from preview — trailing `\n` changed to `\n\n` so markdown parser correctly closes the block
+- Affects both selection and no-selection preview paths (extension.ts editor path was already correct)
+
+## 0.4.0
+
+Better AI enforcement and new "Copy AI Instructions" command.
+
+- Add `acemd.headerFormat` setting: choose between `markdown` (visible callout, new default) or `html` (hidden comment). Markdown headers are much harder for LLMs to ignore.
+- Add "Ace: Copy AI Instructions" command: copies LLM-agnostic annotation rules to clipboard for pasting into CLAUDE.md, .cursorrules, or other AI config files
+- Fix editor-side annotations (keyboard shortcuts) not inserting the instruction header — previously only preview-originated annotations did this
+- Both header formats are correctly detected when clearing annotations, rendering preview, and computing line offsets
+
 ## 0.3.1
 
 Bug fixes for preview-to-source annotation mapping.

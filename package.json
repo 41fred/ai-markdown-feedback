@@ -2,7 +2,7 @@
   "name": "ai-markdown-feedback",
   "displayName": "Ace: AI Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",
@@ -75,6 +75,10 @@
       {
         "command": "acemd.clearAllAnnotations",
         "title": "Ace: Clear All Annotations"
+      },
+      {
+        "command": "acemd.copyAIInstructions",
+        "title": "Ace: Copy AI Instructions"
       }
     ],
     "menus": {
@@ -162,6 +166,16 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically open the Ace preview when a Markdown file becomes active"
+        },
+        "acemd.headerFormat": {
+          "type": "string",
+          "enum": ["markdown", "html"],
+          "default": "markdown",
+          "enumDescriptions": [
+            "Visible Markdown callout — stronger signal for AI tools (recommended)",
+            "Hidden HTML comment — invisible in source but often ignored by AI tools"
+          ],
+          "description": "Format of the instruction header auto-inserted when the first annotation is added. Markdown is recommended because AI tools are more likely to follow visible instructions."
         },
         "acemd.autoOpenMode": {
           "type": "string",

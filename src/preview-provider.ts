@@ -448,7 +448,7 @@ async function applyAnnotationAtLine(
       placeHolder: 'Change X to Y',
     });
     if (!suggestion) { return; }
-    edit.insert(document.uri, lineEnd, `\n\n> [!EDIT] ${suggestion}\n`);
+    edit.insert(document.uri, lineEnd, `\n\n> [!EDIT] ${suggestion}\n\n`);
   }
 
   await ensureAnnotationHeader(document, edit);
@@ -523,7 +523,7 @@ async function applyEdit(
         placeHolder: 'Change X to Y',
       });
       if (!suggestion) { return; }
-      edit.insert(document.uri, matchRange.end, `\n\n> [!EDIT] ${suggestion}\n`);
+      edit.insert(document.uri, matchRange.end, `\n\n> [!EDIT] ${suggestion}\n\n`);
       break;
     }
   }
@@ -538,18 +538,31 @@ async function applyEdit(
  * Count how many lines the annotation header occupies in the document.
  * Returns 0 if no header is present.
  */
-function getHeaderLineCount(text: string): number {
-  const match = text.match(/<!-- AI Markdown Feedback:[\s\S]*?-->\n?\n?/);
-  if (!match) { return 0; }
-  return match[0].split('\n').length - 1 + (match[0].endsWith('\n\n') ? 1 : 0);
-}
+// --- Annotation header constants (two formats: HTML comment or Markdown callout) ---
 
-const ANNOTATION_HEADER = `<!-- AI Markdown Feedback: This file contains reviewer annotations.
-==highlights== mark text for discussion. %%comments%% are inline feedback (hidden in preview).
+const HTML_ANNOTATION_HEADER = `<!-- AI Markdown Feedback: This file contains reviewer annotations.
+==highlights== mark text for discussion. %%comments%% are inline feedback (hidden in preview, visible in source).
 ~~deletions~~ suggest text removal. > [!EDIT] blocks are change requests.
 These markers are intentional — do not remove or "clean up" without asking the reviewer. -->`;
 
-const HEADER_MARKER = '<!-- AI Markdown Feedback:';
+const MARKDOWN_ANNOTATION_HEADER = `> [!NOTE]
+> **Annotations present.** This file contains reviewer feedback.
+> \`==highlights==\` flag text for discussion. \`%%comments%%\` are inline notes (hidden in preview, visible in source).
+> \`~~deletions~~\` suggest removal. \`> [!EDIT]\` blocks are change requests.
+> These markers are intentional — do not remove or "clean up" without asking the reviewer.`;
+
+const HTML_HEADER_REGEX = /^<!-- AI Markdown Feedback:[\s\S]*?-->\r?\n?\r?\n?/;
+const MARKDOWN_HEADER_REGEX = /^> \[!NOTE\]\r?\n> \*\*Annotations present\.\*\*[\s\S]*?without asking the reviewer\.\r?\n?\r?\n?/;
+
+function hasAnyAnnotationHeader(text: string): boolean {
+  return HTML_HEADER_REGEX.test(text) || MARKDOWN_HEADER_REGEX.test(text);
+}
+
+function getHeaderLineCount(text: string): number {
+  const match = text.match(HTML_HEADER_REGEX) ?? text.match(MARKDOWN_HEADER_REGEX);
+  if (!match) { return 0; }
+  return match[0].split(/\r?\n/).length - 1;
+}
 
 // Track documents that already have a pending header insertion in the current edit cycle.
 // This prevents duplicate headers when multiple annotations are applied rapidly.
@@ -558,27 +571,34 @@ const pendingHeaderInserts = new Set<string>();
 /**
  * If the document doesn't already have the annotation header, add it.
  * Guards against duplicate inserts from concurrent edits.
+ * Reads the acemd.headerFormat setting to choose HTML or Markdown format.
  */
-function ensureAnnotationHeader(document: vscode.TextDocument, edit: vscode.WorkspaceEdit): void {
+export function ensureAnnotationHeader(document: vscode.TextDocument, edit: vscode.WorkspaceEdit): void {
   const uri = document.uri.toString();
   const text = document.getText();
-  const hasHeader = text.includes(HEADER_MARKER);
 
-  if (!hasHeader && !pendingHeaderInserts.has(uri)) {
-    pendingHeaderInserts.add(uri);
-    edit.insert(document.uri, new vscode.Position(0, 0), ANNOTATION_HEADER + '\n\n');
-    // Clear the pending flag after the edit is applied
-    setTimeout(() => pendingHeaderInserts.delete(uri), 500);
+  if (hasAnyAnnotationHeader(text) || pendingHeaderInserts.has(uri)) {
+    return;
   }
+
+  const config = vscode.workspace.getConfiguration('acemd', document.uri);
+  const format = config.get<'markdown' | 'html'>('headerFormat', 'markdown');
+  const header = format === 'html' ? HTML_ANNOTATION_HEADER : MARKDOWN_ANNOTATION_HEADER;
+
+  pendingHeaderInserts.add(uri);
+  edit.insert(document.uri, new vscode.Position(0, 0), header + '\n\n');
+  // Clear the pending flag after the edit is applied
+  setTimeout(() => pendingHeaderInserts.delete(uri), 500);
 }
 
 // --- Clear All Annotations ---
 
 export function clearAllAnnotations(text: string): string {
-  // Remove ALL annotation header copies (handles duplicates)
+  // Remove ALL annotation header copies — both HTML and Markdown formats (handles duplicates)
   let next = text;
-  while (next.includes(HEADER_MARKER)) {
-    next = next.replace(/<!-- AI Markdown Feedback:[\s\S]*?-->\r?\n?\r?\n?/, '');
+  while (hasAnyAnnotationHeader(next)) {
+    next = next.replace(HTML_HEADER_REGEX, '');
+    next = next.replace(MARKDOWN_HEADER_REGEX, '');
   }
 
   // Fixed-point loop for nested markers (e.g., ==~~text~~==)
@@ -647,8 +667,10 @@ function createMarkdownEngine(): MarkdownIt {
 }
 
 function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vscode.Webview): string {
-  // Strip the annotation header before rendering — it's for LLMs, not the preview
-  const source = document.getText().replace(/<!-- AI Markdown Feedback:[\s\S]*?-->\n?\n?/, '');
+  // Strip annotation headers (HTML or Markdown format) before rendering — they're for LLMs, not the preview
+  const source = document.getText()
+    .replace(HTML_HEADER_REGEX, '')
+    .replace(MARKDOWN_HEADER_REGEX, '');
   const rendered = md.render(source);
   const config = vscode.workspace.getConfiguration('acemd');
   const highlightColor = config.get<string>('highlightColor', '#fff3a0');

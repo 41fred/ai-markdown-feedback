@@ -2,6 +2,8 @@
 
 Annotate Markdown files with structured feedback that LLMs can read and act on.
 
+![Ace AI Markdown Feedback — side-by-side annotation preview with highlight and comment](media/preview.jpg)
+
 ## The Problem
 
 LLM coding agents generate Markdown artifacts — plans, docs, code explanations. When you want to give feedback, you're stuck writing free-form text or making inline edits that lose context. There's no structured way to say "discuss this", "change that", or "remove this section" in a format the LLM can parse.
@@ -45,21 +47,35 @@ When you annotate from the preview, changes are written to the underlying `.md` 
 
 ## Annotation Header
 
-On the first annotation, Ace injects a comment at the top of the file:
+On the first annotation, Ace inserts an instruction header at the top of the file telling AI tools to respect the markers.
+
+**Markdown format** (default) — a visible callout that LLMs can't miss:
 
 ```markdown
-<!-- AI Markdown Feedback: This file contains reviewer annotations.
-==highlights== mark text for discussion. %%comments%% are inline feedback.
-~~deletions~~ suggest text removal. > [!EDIT] blocks are change requests.
-These markers are intentional — do not remove or "clean up" without asking the reviewer. -->
+> [!NOTE]
+> **Annotations present.** This file contains reviewer feedback.
+> `==highlights==` flag text for discussion. `%%comments%%` are inline notes.
+> `~~deletions~~` suggest removal. `> [!EDIT]` blocks are change requests.
+> Do not remove these markers — process them as feedback.
 ```
 
-This tells LLMs to respect the annotations. It's removed automatically when all annotations are cleared.
+**HTML format** — a hidden comment (previous default, less reliable with LLMs):
+
+```markdown
+<!-- AI Markdown Feedback: This file contains reviewer annotations. ... -->
+```
+
+Change the format in settings with `acemd.headerFormat`. The header is removed automatically when all annotations are cleared.
+
+## AI Instructions for Your Config
+
+Run `Cmd+Shift+P` → **"Ace: Copy AI Instructions"** to copy a ready-to-paste snippet explaining all annotation types. Add it to your `CLAUDE.md`, `.cursorrules`, Copilot instructions, or any AI config file to ensure your tools always respect Ace annotations.
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `acemd.headerFormat` | `markdown` | Instruction header format: `markdown` (visible callout) or `html` (hidden comment) |
 | `acemd.highlightColor` | `#fff3a0` | Background color for highlighted text |
 | `acemd.showAnnotationGutter` | `true` | Show annotation markers in the gutter |
 
