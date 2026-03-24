@@ -2,7 +2,7 @@
   "name": "ai-markdown-feedback",
   "displayName": "Ace: AI Markdown Feedback",
   "description": "Annotate Markdown files in VS Code with structured feedback for Claude, Codex, and other LLMs — highlight, comment, suggest edits, and mark deletions.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "license": "MIT",
   "publisher": "AlfredNaayem",
   "icon": "media/icon.png",
@@ -164,7 +164,7 @@
         },
         "acemd.autoOpenPreview": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically open the Ace preview when a Markdown file becomes active"
         },
         "acemd.headerFormat": {
@@ -180,7 +180,7 @@
         "acemd.autoOpenMode": {
           "type": "string",
           "enum": ["side", "replace"],
-          "default": "side",
+          "default": "replace",
           "enumDescriptions": [
             "Open a side-by-side preview next to the editor",
             "Replace the editor with a preview-only view (no code visible)"

@@ -75,6 +75,8 @@ Run `Cmd+Shift+P` → **"Ace: Copy AI Instructions"** to copy a ready-to-paste s
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `acemd.autoOpenPreview` | `true` | Automatically open the Ace preview when a Markdown file becomes active |
+| `acemd.autoOpenMode` | `replace` | How auto-open behaves: `replace` (preview-only) or `side` (side-by-side) |
 | `acemd.headerFormat` | `markdown` | Instruction header format: `markdown` (visible callout) or `html` (hidden comment) |
 | `acemd.highlightColor` | `#fff3a0` | Background color for highlighted text |
 | `acemd.showAnnotationGutter` | `true` | Show annotation markers in the gutter |

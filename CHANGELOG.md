@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+Better defaults and preview image.
+
+- Change `acemd.autoOpenPreview` default to `true` — preview opens automatically when you open a markdown file
+- Change `acemd.autoOpenMode` default to `replace` — preview replaces the code editor instead of opening side-by-side
+- Add preview screenshot to README for marketplace listing
+
 ## 0.4.1
 
 Fix edit annotation swallowing subsequent content.
