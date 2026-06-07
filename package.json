@@ -186,6 +186,11 @@
             "Replace the editor with a preview-only view (no code visible)"
           ],
           "description": "How auto-open preview behaves: side-by-side or preview-only"
+        },
+        "acemd.scrollSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Synchronize scrolling between the Markdown source editor and the Ace preview (both directions)."
         }
       }
     }

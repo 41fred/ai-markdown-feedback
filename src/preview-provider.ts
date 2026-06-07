@@ -666,16 +666,92 @@ function createMarkdownEngine(): MarkdownIt {
   return md;
 }
 
+// --- Scroll sync + local-image rewriting ---
+
+// Per-document throttle: while we programmatically scroll the source editor in
+// response to a preview scroll, ignore the resulting visible-range events so the
+// two sides don't echo each other into a feedback loop.
+const scrollSyncLocks: Map<string, number> = new Map();
+const SCROLL_SYNC_LOCK_MS = 250;
+
+function lockScrollSync(uri: string): void {
+  scrollSyncLocks.set(uri, Date.now() + SCROLL_SYNC_LOCK_MS);
+}
+function isScrollSyncLocked(uri: string): boolean {
+  return Date.now() < (scrollSyncLocks.get(uri) ?? 0);
+}
+function isScrollSyncEnabled(): boolean {
+  return vscode.workspace.getConfiguration('acemd').get<boolean>('scrollSync', true);
+}
+
+// Resource roots the preview webview may load from: the extension's media
+// folder, the document's own directory (so relative local images resolve), and
+// any workspace folders.
+function localResourceRootsFor(extensionUri: vscode.Uri, document: vscode.TextDocument): vscode.Uri[] {
+  const roots: vscode.Uri[] = [vscode.Uri.joinPath(extensionUri, 'media')];
+  try {
+    roots.push(vscode.Uri.joinPath(document.uri, '..'));
+  } catch { /* untitled / non-file documents have no parent dir */ }
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    roots.push(folder.uri);
+  }
+  return roots;
+}
+
+function findVisibleSourceEditor(document: vscode.TextDocument): vscode.TextEditor | undefined {
+  return vscode.window.visibleTextEditors.find(
+    (editor) => editor.document.uri.toString() === document.uri.toString(),
+  );
+}
+
+// Scroll the matching source editor so that `line` (1-based) sits at the top.
+function scrollSourceEditorToLine(document: vscode.TextDocument, line: number): void {
+  const editor = findVisibleSourceEditor(document);
+  if (!editor) { return; }
+  const targetLine = Math.max(0, Math.floor(line) - 1);
+  const range = new vscode.Range(targetLine, 0, targetLine, 0);
+  editor.revealRange(range, vscode.TextEditorRevealType.AtTop);
+}
+
+// markdown-it emits local image paths verbatim; the webview cannot load them
+// unless the src is converted to a webview URI (and the containing folder is an
+// allowed resource root). Remote http(s)/data/blob URIs are left untouched.
+function rewriteLocalImageUris(html: string, document: vscode.TextDocument, webview: vscode.Webview): string {
+  if (!html || html.indexOf('<img') < 0) { return html; }
+  const baseDir = vscode.Uri.joinPath(document.uri, '..');
+  return html.replace(/(<img\b[^>]*?\bsrc=")([^"]*)(")/g, (match, prefix, src, suffix) => {
+    try {
+      if (/^(https?:|data:|vscode-webview-resource:|vscode-resource:|blob:|#)/i.test(src)) {
+        return match;
+      }
+      let raw = src;
+      try { raw = decodeURIComponent(src); } catch { /* keep encoded form */ }
+      let uri: vscode.Uri;
+      if (/^file:/i.test(raw)) {
+        uri = vscode.Uri.parse(raw);
+      } else if (raw.charAt(0) === '/') {
+        uri = vscode.Uri.file(raw);
+      } else {
+        uri = vscode.Uri.joinPath(baseDir, raw);
+      }
+      return prefix + webview.asWebviewUri(uri).toString() + suffix;
+    } catch {
+      return match;
+    }
+  });
+}
+
 function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vscode.Webview): string {
   // Strip annotation headers (HTML or Markdown format) before rendering — they're for LLMs, not the preview
   const source = document.getText()
     .replace(HTML_HEADER_REGEX, '')
     .replace(MARKDOWN_HEADER_REGEX, '');
-  const rendered = md.render(source);
+  const rendered = rewriteLocalImageUris(md.render(source), document, webview);
   const config = vscode.workspace.getConfiguration('acemd');
   const highlightColor = config.get<string>('highlightColor', '#fff3a0');
   const showGutter = config.get<boolean>('showAnnotationGutter', true);
   const nonce = crypto.randomBytes(16).toString('hex');
+  const scrollSync = config.get<boolean>('scrollSync', true);
 
   return getWebviewContent({
     body: rendered,
@@ -683,6 +759,7 @@ function renderToHtml(md: MarkdownIt, document: vscode.TextDocument, webview: vs
     showGutter,
     cspSource: webview.cspSource,
     nonce,
+    scrollSync,
   });
 }
 
@@ -703,9 +780,7 @@ export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorPro
   ): Promise<void> {
     webviewPanel.webview.options = {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, 'media'),
-      ],
+      localResourceRoots: localResourceRootsFor(this.context.extensionUri, document),
     };
 
     webviewPanel.iconPath = {
@@ -741,7 +816,22 @@ export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorPro
         case 'preview.undo':
           await vscode.commands.executeCommand('undo');
           return;
+        case 'preview.scroll':
+          if (isScrollSyncEnabled() && typeof message.line === 'number') {
+            lockScrollSync(document.uri.toString());
+            scrollSourceEditorToLine(document, message.line);
+          }
+          return;
       }
+    });
+
+    const visibleRangesSub = vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+      if (!isScrollSyncEnabled()) { return; }
+      if (e.textEditor.document.uri.toString() !== document.uri.toString()) { return; }
+      if (isScrollSyncLocked(document.uri.toString())) { return; }
+      const visible = e.visibleRanges[0];
+      if (!visible) { return; }
+      webviewPanel.webview.postMessage({ type: 'extension.scrollToLine', line: visible.start.line + 1 });
     });
 
     activeWebviews.add(webviewPanel.webview);
@@ -749,6 +839,7 @@ export class MarkdownPreviewEditorProvider implements vscode.CustomTextEditorPro
       activeWebviews.delete(webviewPanel.webview);
       changeSub.dispose();
       msgSub.dispose();
+      visibleRangesSub.dispose();
     });
 
     updateWebview();
@@ -785,9 +876,7 @@ export class SidePanelPreviewProvider {
       },
       {
         enableScripts: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(this.extensionUri, 'media'),
-        ],
+        localResourceRoots: localResourceRootsFor(this.extensionUri, document),
         retainContextWhenHidden: true,
       }
     );
@@ -851,10 +940,28 @@ export class SidePanelPreviewProvider {
               this.panel.reveal(vscode.ViewColumn.Beside, true);
             }
             return;
+
+          case 'preview.scroll':
+            if (isScrollSyncEnabled() && typeof message.line === 'number') {
+              lockScrollSync(this.document.uri.toString());
+              scrollSourceEditorToLine(this.document, message.line);
+            }
+            return;
         }
       },
       null,
       this.disposables
+    );
+
+    this.disposables.push(
+      vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+        if (!isScrollSyncEnabled() || !this.document || !this.panel) { return; }
+        if (e.textEditor.document.uri.toString() !== this.document.uri.toString()) { return; }
+        if (isScrollSyncLocked(this.document.uri.toString())) { return; }
+        const visible = e.visibleRanges[0];
+        if (!visible) { return; }
+        this.panel.webview.postMessage({ type: 'extension.scrollToLine', line: visible.start.line + 1 });
+      })
     );
 
     this.updatePreview();

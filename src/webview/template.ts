@@ -4,10 +4,11 @@ export interface WebviewOptions {
   showGutter: boolean;
   cspSource: string;
   nonce: string;
+  scrollSync: boolean;
 }
 
 export function getWebviewContent(options: WebviewOptions): string {
-  const { body, highlightColor, showGutter, cspSource, nonce } = options;
+  const { body, highlightColor, showGutter, cspSource, nonce, scrollSync } = options;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -303,7 +304,7 @@ export function getWebviewContent(options: WebviewOptions): string {
     .ace-summary-type.delete { color: #f44336; }
   </style>
 </head>
-<body>
+<body data-scroll-sync="${scrollSync}">
   <div id="ace-toolbar">
     <button class="ace-toolbar-btn" data-command="insertHighlight" data-needs-selection="true" data-key="h" title="Highlight selected text — press H in preview">
       <span class="ace-btn-icon">&#x1F58D;&#xFE0F;</span>
@@ -611,6 +612,93 @@ export function getWebviewContent(options: WebviewOptions): string {
         div.textContent = text;
         return div.innerHTML;
       }
+
+      // --- Scroll sync: report the source line at the top of the preview, and
+      // scroll the preview when the source editor scrolls (extension.scrollToLine). ---
+      var aceSyncOn = document.body.getAttribute('data-scroll-sync') !== 'false';
+      var ACE_BLOCK_TAGS = { P:1,H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,LI:1,UL:1,OL:1,BLOCKQUOTE:1,PRE:1,TABLE:1,THEAD:1,TBODY:1,TR:1,TH:1,TD:1,HR:1,DL:1,DT:1,DD:1,DIV:1,FIGURE:1,IMG:1 };
+      var aceIncomingLockUntil = 0;
+      var aceScrollRaf = 0;
+
+      function aceToolbarHeight() {
+        var tb = document.getElementById('ace-toolbar');
+        return tb ? tb.getBoundingClientRect().height : 0;
+      }
+      function aceBlocks() {
+        var nodes = document.querySelectorAll('#ace-content [data-source-line]');
+        var out = [];
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          if (!ACE_BLOCK_TAGS[el.tagName]) continue;
+          if (!el.getClientRects().length) continue;
+          var line = parseInt(el.getAttribute('data-source-line'), 10);
+          if (!(line > 0)) continue;
+          var ea = el.getAttribute('data-source-end-line');
+          var endLine = ea ? parseInt(ea, 10) : line;
+          out.push({ el: el, line: line, endLine: endLine > line ? endLine : line });
+        }
+        return out;
+      }
+      function aceTopSourceLine() {
+        var items = aceBlocks();
+        if (!items.length) return 1;
+        var fold = aceToolbarHeight();
+        var prev = null;
+        for (var i = 0; i < items.length; i++) {
+          var rect = items[i].el.getBoundingClientRect();
+          if (rect.top - fold > 0.5) {
+            if (!prev) return items[i].line;
+            var pr = prev.el.getBoundingClientRect();
+            var h = Math.max(1, pr.height);
+            var frac = Math.min(1, Math.max(0, (fold - pr.top) / h));
+            return prev.line + frac * (prev.endLine - prev.line);
+          }
+          prev = items[i];
+        }
+        return prev ? prev.endLine : 1;
+      }
+      function aceOnScroll() {
+        if (!aceSyncOn) return;
+        if (Date.now() < aceIncomingLockUntil) return;
+        if (aceScrollRaf) return;
+        aceScrollRaf = requestAnimationFrame(function () {
+          aceScrollRaf = 0;
+          if (Date.now() < aceIncomingLockUntil) return;
+          vscode.postMessage({ type: 'preview.scroll', line: aceTopSourceLine() });
+        });
+      }
+      window.addEventListener('scroll', aceOnScroll, { passive: true });
+
+      function aceScrollToSourceLine(L) {
+        var items = aceBlocks();
+        if (!items.length) return;
+        var target = null, next = null;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].line <= L) target = items[i];
+          else { next = items[i]; break; }
+        }
+        if (!target) target = items[0];
+        var fold = aceToolbarHeight();
+        var rect = target.el.getBoundingClientRect();
+        var y = window.scrollY + rect.top - fold;
+        var span = target.endLine - target.line;
+        if (span > 0) {
+          y += Math.min(1, Math.max(0, (L - target.line) / span)) * rect.height;
+        } else if (next) {
+          var nr = next.el.getBoundingClientRect();
+          var denom = Math.max(1, next.line - target.line);
+          y += Math.min(1, Math.max(0, (L - target.line) / denom)) * (nr.top - rect.top);
+        }
+        aceIncomingLockUntil = Date.now() + 250;
+        window.scrollTo(0, Math.max(0, y));
+      }
+
+      window.addEventListener('message', function (event) {
+        var msg = event.data;
+        if (msg && msg.type === 'extension.scrollToLine' && aceSyncOn) {
+          aceScrollToSourceLine(msg.line);
+        }
+      });
     })();
   </script>
 </body>
