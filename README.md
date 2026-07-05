@@ -1,5 +1,7 @@
 # Ace: AI Markdown Feedback
 
+![Give your AI feedback it can read — Ace: AI Markdown Feedback for VS Code](media/social-preview.png)
+
 Annotate Markdown files with structured feedback that LLMs can read and act on.
 
 ![Ace AI Markdown Feedback — side-by-side annotation preview with highlight and comment](media/preview.jpg)
