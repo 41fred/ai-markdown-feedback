@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+Metadata-only release.
+
+- Point repository/homepage/bugs URLs at the renamed GitHub repo `41fred/ai-markdown-feedback-for-vs-code` (Marketplace listing links were still on the old slug)
+
 ## 0.4.2
 
 Better defaults and preview image.
