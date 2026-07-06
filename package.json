@@ -8,11 +8,11 @@
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/41fred/ai-markdown-feedback"
+    "url": "https://github.com/41fred/ai-markdown-feedback-for-vs-code"
   },
-  "homepage": "https://github.com/41fred/ai-markdown-feedback#readme",
+  "homepage": "https://github.com/41fred/ai-markdown-feedback-for-vs-code#readme",
   "bugs": {
-    "url": "https://github.com/41fred/ai-markdown-feedback/issues"
+    "url": "https://github.com/41fred/ai-markdown-feedback-for-vs-code/issues"
   },
   "keywords": [
     "markdown",
