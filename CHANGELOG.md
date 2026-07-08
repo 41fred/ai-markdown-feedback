@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4
+
+Preview screenshot refresh.
+
+- Replace the README preview screenshot (`media/preview.jpg`) with a version that removes a filesystem breadcrumb from the editor chrome
+
 ## 0.4.3
 
 Metadata-only release.
